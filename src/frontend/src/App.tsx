@@ -50,7 +50,7 @@ import { DataAccessError } from './components';
 
 // API
 import { getAuthStatus, checkDataAccess } from './services/api';
-import type { AuthStatus, DataAccessStatus, User } from './types';
+import type { DataAccessStatus, User } from './types';
 
 const DRAWER_WIDTH = 260;
 

@@ -5,9 +5,7 @@ import {
   CardContent,
   CardHeader,
   Typography,
-  TextField,
   Button,
-  Divider,
   Alert,
   Chip,
   Table,
@@ -16,17 +14,14 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Switch,
-  FormControlLabel,
 } from '@mui/material';
-import { Save, Refresh, Speed, Storage } from '@mui/icons-material';
+import { Refresh, Speed, Storage } from '@mui/icons-material';
 
 import { getPerformanceStats, getAuthStatus } from '../services/api';
 import type { PerformanceStats, AuthStatus } from '../types';
 
 const Settings: React.FC = () => {
   const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats | null>(null);
 

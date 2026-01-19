@@ -10,10 +10,8 @@ import {
   ListItem,
   ListItemButton,
   ListItemText,
-  Divider,
   CircularProgress,
   Alert,
-  Chip,
   Paper,
 } from '@mui/material';
 import { Send, SmartToy, Person, Lightbulb } from '@mui/icons-material';
@@ -61,7 +59,7 @@ const AIAssistant: React.FC = () => {
 
       // Start new conversation if needed
       if (!convId) {
-        const spaceId = process.env.GENIE_SPACE_ID || ''; // This would come from config
+        const spaceId = ''; // This would come from config
         if (!spaceId) {
           throw new Error('Genie Space not configured. Please configure GENIE_SPACE_ID in settings.');
         }

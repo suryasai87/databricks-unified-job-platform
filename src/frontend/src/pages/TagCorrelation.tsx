@@ -23,7 +23,7 @@ import {
   LinearProgress,
   Button,
 } from '@mui/material';
-import { LocalOffer, Warning, ContentCopy } from '@mui/icons-material';
+import { LocalOffer, ContentCopy } from '@mui/icons-material';
 import {
   PieChart,
   Pie,
@@ -38,11 +38,9 @@ import {
   getTagSummary,
   getTagCorrelations,
   getTagsByPipeline,
-  getUnmatchedRuns,
 } from '../services/api';
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import type { TagSummary, TagCorrelation } from '../types';
-
-const COLORS = ['#4CAF50', '#F44336', '#FF9800', '#2196F3'];
 
 const TagCorrelationPage: React.FC = () => {
   const [days, setDays] = useState(30);
@@ -53,7 +51,6 @@ const TagCorrelationPage: React.FC = () => {
   const [summary, setSummary] = useState<TagSummary | null>(null);
   const [correlations, setCorrelations] = useState<TagCorrelation[]>([]);
   const [byPipeline, setByPipeline] = useState<any[]>([]);
-  const [unmatched, setUnmatched] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -64,17 +61,15 @@ const TagCorrelationPage: React.FC = () => {
     setError(null);
 
     try {
-      const [summaryRes, corrRes, pipelineRes, unmatchedRes] = await Promise.all([
+      const [summaryRes, corrRes, pipelineRes] = await Promise.all([
         getTagSummary(days),
         getTagCorrelations(days, 50),
         getTagsByPipeline(days, 10),
-        getUnmatchedRuns(7, 20),
       ]);
 
       setSummary(summaryRes.data);
       setCorrelations(corrRes.data);
       setByPipeline(pipelineRes.data);
-      setUnmatched(unmatchedRes.data);
     } catch (err) {
       console.error('Failed to load tag data:', err);
       setError('Failed to load tag correlation data. Please try again.');

@@ -3,7 +3,6 @@ import {
   Box,
   Grid,
   Card,
-  CardContent,
   CardHeader,
   Typography,
   Table,
