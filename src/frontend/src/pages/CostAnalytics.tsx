@@ -19,14 +19,17 @@ import {
   Skeleton,
   Alert,
   Chip,
+  Link,
+  Tooltip as MuiTooltip,
 } from '@mui/material';
+import { OpenInNew } from '@mui/icons-material';
 import {
   AreaChart,
   Area,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
   PieChart,
   Pie,
@@ -190,7 +193,7 @@ const CostAnalytics: React.FC = () => {
                       tick={{ fill: '#888' }}
                       tickFormatter={(value) => `$${value}`}
                     />
-                    <Tooltip
+                    <RechartsTooltip
                       contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333' }}
                       formatter={(value: number) => [formatCurrency(value), 'Cost']}
                     />
@@ -232,7 +235,7 @@ const CostAnalytics: React.FC = () => {
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip
+                    <RechartsTooltip
                       contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333' }}
                       formatter={(value: number) => formatCurrency(value)}
                     />
@@ -265,6 +268,7 @@ const CostAnalytics: React.FC = () => {
               <TableRow>
                 <TableCell>Rank</TableCell>
                 <TableCell>Job ID</TableCell>
+                <TableCell>Job Name</TableCell>
                 <TableCell>Notebook Path</TableCell>
                 <TableCell align="right">Total Cost</TableCell>
                 <TableCell align="right">DBUs</TableCell>
@@ -276,7 +280,7 @@ const CostAnalytics: React.FC = () => {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 7 }).map((_, j) => (
+                    {Array.from({ length: 8 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton variant="text" />
                       </TableCell>
@@ -293,11 +297,34 @@ const CostAnalytics: React.FC = () => {
                         color={index < 3 ? 'error' : 'default'}
                       />
                     </TableCell>
-                    <TableCell>{job.job_id}</TableCell>
                     <TableCell>
-                      <Typography variant="body2" noWrap sx={{ maxWidth: 300 }}>
-                        {job.notebook_path || '-'}
-                      </Typography>
+                      {job.job_url ? (
+                        <Link
+                          href={job.job_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+                        >
+                          {job.job_id}
+                          <OpenInNew sx={{ fontSize: 14 }} />
+                        </Link>
+                      ) : (
+                        job.job_id
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <MuiTooltip title={job.job_name || `Job ${job.job_id}`}>
+                        <Typography variant="body2" noWrap sx={{ maxWidth: 180 }}>
+                          {job.job_name || `Job ${job.job_id}`}
+                        </Typography>
+                      </MuiTooltip>
+                    </TableCell>
+                    <TableCell>
+                      <MuiTooltip title={job.notebook_path || 'No notebook path (may be a non-notebook task or deleted)'}>
+                        <Typography variant="body2" noWrap sx={{ maxWidth: 200, color: job.notebook_path ? 'inherit' : 'text.secondary' }}>
+                          {job.notebook_path || 'N/A'}
+                        </Typography>
+                      </MuiTooltip>
                     </TableCell>
                     <TableCell align="right">
                       <Typography fontWeight={600} color="primary">

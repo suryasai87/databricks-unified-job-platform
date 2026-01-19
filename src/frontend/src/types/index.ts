@@ -90,11 +90,14 @@ export interface DailyCost {
 
 export interface TopJob {
   job_id: number;
+  job_name: string;
+  workspace_id: string | null;
   notebook_path: string | null;
   total_cost: number;
   total_dbus: number;
   run_count: number;
   avg_cost_per_run: number;
+  job_url: string | null;
 }
 
 export interface CostByProject {
