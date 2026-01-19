@@ -12,38 +12,8 @@ resources:
         - Lakebase integration for sub-100ms query performance
       source_code_path: ${workspace.file_path}/app
 
-      config:
-        command:
-          - uvicorn
-          - app:app
-          - --host
-          - "0.0.0.0"
-          - --port
-          - "8000"
-
-        env:
-          - name: DATABRICKS_HOST
-            value: fe-vm-hls-amer.cloud.databricks.com
-          - name: CATALOG
-            value: ${var.catalog}
-          - name: SCHEMA
-            value: ${var.schema}
-          - name: WAREHOUSE_ID
-            value: ${var.warehouse_id}
-          - name: GENIE_SPACE_ID
-            value: ${var.genie_space_id}
-          - name: LAKEBASE_INSTANCE_ID
-            value: ${var.lakebase_instance_id}
-          - name: LAKEBASE_INSTANCE_NAME
-            value: ${var.lakebase_instance_name}
-          - name: LAKEBASE_ENABLED
-            value: "true"
-          - name: CACHE_TTL
-            value: "300"
-
       resources:
         - name: sql-warehouse
           sql_warehouse:
             id: ${var.warehouse_id}
-        - name: lakebase-instance
-          description: Lakebase PostgreSQL instance for accelerated queries
+            permission: CAN_USE
