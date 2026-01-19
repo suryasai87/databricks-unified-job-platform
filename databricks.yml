@@ -1,0 +1,52 @@
+# Databricks Asset Bundle Configuration
+# Unified Job Platform: Job Monitoring + Cost Attribution + Serverless Tagging
+bundle:
+  name: unified-job-platform
+
+workspace:
+  host: https://fe-vm-hls-amer.cloud.databricks.com
+
+variables:
+  catalog:
+    description: Unity Catalog name
+    default: hls_amer_catalog
+  schema:
+    description: Schema for cost management tables
+    default: cost_management
+  warehouse_id:
+    description: SQL Warehouse ID for queries
+    default: "4b28691c780d9875"
+  genie_space_id:
+    description: Genie Space ID for AI assistant
+    default: ""
+  lakebase_instance_id:
+    description: Lakebase instance ID for real-time queries
+    default: "6b59171b-cee8-4acc-9209-6c848ffbfbfe"
+  lakebase_instance_name:
+    description: Lakebase instance name
+    default: "lakebasepoc"
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/dev
+    variables:
+      catalog: hls_amer_catalog
+      schema: cost_management
+
+  staging:
+    mode: development
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/staging
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Applications/${bundle.name}
+    run_as:
+      service_principal_name: ${var.service_principal_name}

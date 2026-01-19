@@ -1,0 +1,25 @@
+# Unified Job Platform - Backend Dependencies
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Databricks SDK
+databricks-sdk==0.18.0
+
+# Data Processing
+pandas>=2.0.0
+
+# PostgreSQL (for Lakebase)
+psycopg2-binary>=2.9.9
+
+# Auth & Security
+pyjwt>=2.8.0
+cryptography>=41.0.7
+python-dotenv>=1.0.0
+
+# HTTP Client
+httpx>=0.26.0
+
+# Pydantic
+pydantic>=2.5.0
