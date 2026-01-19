@@ -56,23 +56,25 @@ async def get_job_runs(
 
     status_filter = ""
     if status:
-        status_filter = f"AND result_state = '{status}'"
+        status_filter = f"AND r.result_state = '{status}'"
 
     query = f"""
         SELECT
-            job_id,
-            job_name,
-            run_id,
-            result_state,
-            run_type,
-            CAST(period_start_time AS STRING) AS start_time,
-            CAST(period_end_time AS STRING) AS end_time,
-            execution_duration / 1000.0 AS execution_duration,
-            creator_user_name
-        FROM system.lakeflow.job_run_timeline
-        WHERE period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
+            CAST(r.job_id AS BIGINT) AS job_id,
+            j.name AS job_name,
+            CAST(r.run_id AS BIGINT) AS run_id,
+            r.result_state,
+            r.run_type,
+            CAST(r.period_start_time AS STRING) AS start_time,
+            CAST(r.period_end_time AS STRING) AS end_time,
+            r.execution_duration_seconds AS execution_duration,
+            j.creator_user_name
+        FROM system.lakeflow.job_run_timeline r
+        LEFT JOIN system.lakeflow.jobs j
+            ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+        WHERE r.period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
         {status_filter}
-        ORDER BY period_start_time DESC
+        ORDER BY r.period_start_time DESC
         LIMIT {limit}
     """
 
@@ -104,8 +106,8 @@ async def get_run_summary(
     query = f"""
         SELECT
             COUNT(*) AS total_runs,
-            SUM(CASE WHEN result_state = 'SUCCESS' THEN 1 ELSE 0 END) AS succeeded,
-            SUM(CASE WHEN result_state = 'FAILED' THEN 1 ELSE 0 END) AS failed,
+            SUM(CASE WHEN result_state = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded,
+            SUM(CASE WHEN result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS failed,
             SUM(CASE WHEN result_state IS NULL OR result_state = 'RUNNING' THEN 1 ELSE 0 END) AS running
         FROM system.lakeflow.job_run_timeline
         WHERE period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
@@ -142,8 +144,8 @@ async def get_daily_runs(
         SELECT
             DATE(period_start_time) AS run_date,
             COUNT(*) AS total_runs,
-            SUM(CASE WHEN result_state = 'SUCCESS' THEN 1 ELSE 0 END) AS succeeded,
-            SUM(CASE WHEN result_state = 'FAILED' THEN 1 ELSE 0 END) AS failed
+            SUM(CASE WHEN result_state = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded,
+            SUM(CASE WHEN result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS failed
         FROM system.lakeflow.job_run_timeline
         WHERE period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
         GROUP BY DATE(period_start_time)
@@ -196,15 +198,17 @@ async def get_jobs_matrix(
     query = f"""
         WITH ranked_runs AS (
             SELECT
-                job_id,
-                job_name,
-                run_id,
-                result_state,
-                CAST(period_start_time AS STRING) AS start_time,
-                execution_duration / 1000.0 AS duration_seconds,
-                ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY period_start_time DESC) AS rn
-            FROM system.lakeflow.job_run_timeline
-            WHERE period_start_time >= CURRENT_DATE - INTERVAL 30 DAY
+                CAST(r.job_id AS BIGINT) AS job_id,
+                j.name AS job_name,
+                CAST(r.run_id AS BIGINT) AS run_id,
+                r.result_state,
+                CAST(r.period_start_time AS STRING) AS start_time,
+                r.execution_duration_seconds AS duration_seconds,
+                ROW_NUMBER() OVER (PARTITION BY r.job_id ORDER BY r.period_start_time DESC) AS rn
+            FROM system.lakeflow.job_run_timeline r
+            LEFT JOIN system.lakeflow.jobs j
+                ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+            WHERE r.period_start_time >= CURRENT_DATE - INTERVAL 30 DAY
         )
         SELECT
             job_id,
@@ -236,7 +240,7 @@ async def get_jobs_matrix(
             "run_id": row[2],
             "result_state": row[3],
             "start_time": row[4],
-            "duration_seconds": row[5],
+            "duration_seconds": float(row[5]) if row[5] is not None else None,
         })
 
     return list(jobs.values())[:limit]
@@ -252,14 +256,16 @@ async def get_overlapping_runs(
     query = f"""
         WITH runs AS (
             SELECT
-                job_id,
-                job_name,
-                run_id,
-                period_start_time,
-                period_end_time,
-                result_state
-            FROM system.lakeflow.job_run_timeline
-            WHERE period_start_time >= CURRENT_TIMESTAMP - INTERVAL {hours} HOUR
+                CAST(r.job_id AS BIGINT) AS job_id,
+                COALESCE(j.name, r.run_name) AS job_name,
+                CAST(r.run_id AS BIGINT) AS run_id,
+                r.period_start_time,
+                r.period_end_time,
+                r.result_state
+            FROM system.lakeflow.job_run_timeline r
+            LEFT JOIN system.lakeflow.jobs j
+                ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+            WHERE r.period_start_time >= CURRENT_TIMESTAMP - INTERVAL {hours} HOUR
         )
         SELECT
             a.job_id AS job_id_1,

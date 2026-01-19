@@ -12,7 +12,7 @@ router = APIRouter()
 
 class TagCorrelation(BaseModel):
     correlation_id: int
-    job_run_id: Optional[int]
+    job_run_id: Optional[str]  # String format like "run_20251222151849_7452"
     notebook_path: Optional[str]
     adf_pipeline_name: Optional[str]
     adf_run_id: Optional[str]

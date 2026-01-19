@@ -181,7 +181,7 @@ export interface SLAStatus {
 // Tag types
 export interface TagCorrelation {
   correlation_id: number;
-  job_run_id: number | null;
+  job_run_id: string | null;  // String format like "run_20251222151849_7452"
   notebook_path: string | null;
   adf_pipeline_name: string | null;
   adf_run_id: string | null;
