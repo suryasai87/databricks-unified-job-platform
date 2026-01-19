@@ -31,19 +31,22 @@ def get_data_layer():
 async def get_cost_summary(
     days: int = Query(30, ge=1, le=90, description="Number of days to look back"),
 ):
-    """Get cost summary statistics."""
+    """Get cost summary statistics using actual list prices."""
     dl = get_data_layer()
-    catalog = os.getenv("CATALOG", "hls_amer_catalog")
-    schema = os.getenv("SCHEMA", "cost_management")
 
+    # Use actual list prices from system.billing.list_prices
     query = f"""
         SELECT
-            COALESCE(SUM(total_cost_usd), 0) AS total_cost,
-            COALESCE(SUM(total_dbus), 0) AS total_dbus,
-            COUNT(DISTINCT job_run_id) AS unique_jobs,
-            COALESCE(SUM(job_runs), 0) AS total_runs
-        FROM {catalog}.{schema}.serverless_cost_summary
-        WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
+            COALESCE(SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)), 0) AS total_cost,
+            COALESCE(SUM(u.usage_quantity), 0) AS total_dbus,
+            COUNT(DISTINCT u.usage_metadata.job_id) AS unique_jobs,
+            COUNT(DISTINCT u.usage_metadata.job_run_id) AS total_runs
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+            ON u.sku_name = p.sku_name
+            AND u.cloud = p.cloud
+            AND p.price_end_time IS NULL
+        WHERE u.usage_date >= CURRENT_DATE - INTERVAL {days} DAY
     """
 
     try:
@@ -75,55 +78,33 @@ async def get_cost_summary(
         )
 
     except Exception as e:
-        # Fall back to system.billing.usage if custom views don't exist
-        fallback_query = f"""
-            SELECT
-                COALESCE(SUM(usage_quantity * 0.15), 0) AS total_cost,
-                COALESCE(SUM(usage_quantity), 0) AS total_dbus,
-                COUNT(DISTINCT usage_metadata.job_id) AS unique_jobs,
-                COUNT(DISTINCT usage_metadata.job_run_id) AS total_runs
-            FROM system.billing.usage
-            WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
-              AND product_features.is_serverless = TRUE
-        """
-
-        try:
-            result = dl.execute_query(fallback_query)
-            row = result.data[0] if result.data else [0, 0, 0, 0]
-
-            return CostSummary(
-                total_cost_usd=round(float(row[0] or 0), 2),
-                total_dbus=round(float(row[1] or 0), 2),
-                unique_jobs=int(row[2] or 0),
-                total_runs=int(row[3] or 0),
-                avg_cost_per_run=round(float(row[0] or 0) / int(row[3] or 1), 4),
-                avg_daily_cost=round(float(row[0] or 0) / days, 2),
-            )
-        except Exception as fallback_error:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to get cost data: {str(fallback_error)}",
-            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get cost data: {str(e)}",
+        )
 
 
 @router.get("/daily")
 async def get_daily_costs(
     days: int = Query(30, ge=1, le=90, description="Number of days to look back"),
 ):
-    """Get daily cost breakdown."""
+    """Get daily cost breakdown using actual list prices."""
     dl = get_data_layer()
 
     query = f"""
         SELECT
-            usage_date,
-            COALESCE(SUM(usage_quantity * 0.15), 0) AS daily_cost,
-            COALESCE(SUM(usage_quantity), 0) AS daily_dbus,
-            COUNT(DISTINCT usage_metadata.job_run_id) AS job_runs
-        FROM system.billing.usage
-        WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
-          AND product_features.is_serverless = TRUE
-        GROUP BY usage_date
-        ORDER BY usage_date
+            u.usage_date,
+            COALESCE(SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)), 0) AS daily_cost,
+            COALESCE(SUM(u.usage_quantity), 0) AS daily_dbus,
+            COUNT(DISTINCT u.usage_metadata.job_run_id) AS job_runs
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+            ON u.sku_name = p.sku_name
+            AND u.cloud = p.cloud
+            AND p.price_end_time IS NULL
+        WHERE u.usage_date >= CURRENT_DATE - INTERVAL {days} DAY
+        GROUP BY u.usage_date
+        ORDER BY u.usage_date
     """
 
     result = dl.execute_query(query)
@@ -144,25 +125,30 @@ async def get_top_expensive_jobs(
     days: int = Query(30, ge=1, le=90, description="Number of days to look back"),
     limit: int = Query(10, ge=1, le=50, description="Number of top jobs to return"),
 ):
-    """Get top expensive jobs with job names and workspace info."""
+    """Get top expensive jobs using actual list prices across all SKUs."""
     dl = get_data_layer()
     host = os.getenv("DATABRICKS_HOST", "fe-vm-hls-amer.cloud.databricks.com")
 
-    # Query using job_name from usage_metadata (already available in billing table)
+    # Query using actual list prices from system.billing.list_prices
     query = f"""
         SELECT
-            usage_metadata.job_id AS job_id,
-            workspace_id,
-            FIRST_VALUE(usage_metadata.job_name) AS job_name,
-            FIRST_VALUE(usage_metadata.notebook_path) AS notebook_path,
-            COALESCE(SUM(usage_quantity * 0.15), 0) AS total_cost,
-            COALESCE(SUM(usage_quantity), 0) AS total_dbus,
-            COUNT(DISTINCT usage_metadata.job_run_id) AS run_count
-        FROM system.billing.usage
-        WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
-          AND product_features.is_serverless = TRUE
-          AND usage_metadata.job_id IS NOT NULL
-        GROUP BY usage_metadata.job_id, workspace_id
+            u.usage_metadata.job_id AS job_id,
+            u.workspace_id,
+            FIRST_VALUE(u.usage_metadata.job_name) AS job_name,
+            FIRST_VALUE(u.usage_metadata.notebook_path) AS notebook_path,
+            COALESCE(SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)), 0) AS total_cost,
+            COALESCE(SUM(u.usage_quantity), 0) AS total_dbus,
+            COUNT(DISTINCT u.usage_metadata.job_run_id) AS run_count,
+            FIRST_VALUE(u.sku_name) AS primary_sku,
+            u.cloud
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+            ON u.sku_name = p.sku_name
+            AND u.cloud = p.cloud
+            AND p.price_end_time IS NULL
+        WHERE u.usage_date >= CURRENT_DATE - INTERVAL {days} DAY
+          AND u.usage_metadata.job_id IS NOT NULL
+        GROUP BY u.usage_metadata.job_id, u.workspace_id, u.cloud
         ORDER BY total_cost DESC
         LIMIT {limit}
     """
@@ -180,6 +166,8 @@ async def get_top_expensive_jobs(
                 "total_dbus": round(float(row[5] or 0), 2),
                 "run_count": int(row[6] or 0),
                 "avg_cost_per_run": round(float(row[4] or 0) / max(int(row[6] or 1), 1), 4),
+                "primary_sku": row[7],
+                "cloud": row[8],
                 "job_url": f"https://{host}/jobs/{row[0]}" if row[0] else None,
             }
             for row in result.data
@@ -427,3 +415,84 @@ async def get_correlation_rate(
             "breakdown": [],
             "message": "Tag correlation table not yet configured",
         }
+
+
+@router.get("/by-sku")
+async def get_cost_by_sku(
+    days: int = Query(30, ge=1, le=90, description="Number of days to look back"),
+    limit: int = Query(20, ge=1, le=50, description="Number of SKUs to return"),
+):
+    """Get cost breakdown by SKU using actual list prices."""
+    dl = get_data_layer()
+
+    query = f"""
+        SELECT
+            u.sku_name,
+            u.cloud,
+            p.pricing.default AS unit_price,
+            COALESCE(SUM(u.usage_quantity), 0) AS total_dbus,
+            COALESCE(SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)), 0) AS total_cost,
+            COUNT(DISTINCT u.usage_metadata.job_id) AS job_count,
+            COUNT(DISTINCT u.workspace_id) AS workspace_count
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+            ON u.sku_name = p.sku_name
+            AND u.cloud = p.cloud
+            AND p.price_end_time IS NULL
+        WHERE u.usage_date >= CURRENT_DATE - INTERVAL {days} DAY
+        GROUP BY u.sku_name, u.cloud, p.pricing.default
+        ORDER BY total_cost DESC
+        LIMIT {limit}
+    """
+
+    try:
+        result = dl.execute_query(query)
+
+        # Categorize SKUs
+        def categorize_sku(sku_name: str) -> str:
+            sku_upper = (sku_name or "").upper()
+            if "SERVERLESS" in sku_upper and "SQL" in sku_upper:
+                return "Serverless SQL"
+            elif "SERVERLESS" in sku_upper and "JOB" in sku_upper:
+                return "Serverless Jobs"
+            elif "SERVERLESS" in sku_upper and "ALL_PURPOSE" in sku_upper:
+                return "Serverless Compute"
+            elif "SERVERLESS" in sku_upper and "DATABASE" in sku_upper:
+                return "Serverless Database"
+            elif "SERVERLESS" in sku_upper and "INFERENCE" in sku_upper:
+                return "Model Serving"
+            elif "MODEL_SERVING" in sku_upper or "INFERENCE" in sku_upper:
+                return "Model Serving"
+            elif "SQL" in sku_upper and "PRO" in sku_upper:
+                return "SQL Pro"
+            elif "SQL" in sku_upper:
+                return "SQL Warehouse"
+            elif "DLT" in sku_upper:
+                return "Delta Live Tables"
+            elif "ALL_PURPOSE" in sku_upper:
+                return "All-Purpose Compute"
+            elif "JOB" in sku_upper:
+                return "Jobs Compute"
+            elif "OLTP" in sku_upper or "LAKEBASE" in sku_upper or "DATABASE" in sku_upper:
+                return "Lakebase/OLTP"
+            else:
+                return "Other"
+
+        return [
+            {
+                "sku_name": row[0],
+                "cloud": row[1],
+                "category": categorize_sku(row[0]),
+                "unit_price": round(float(row[2] or 0), 4),
+                "total_dbus": round(float(row[3] or 0), 2),
+                "total_cost": round(float(row[4] or 0), 2),
+                "job_count": int(row[5] or 0),
+                "workspace_count": int(row[6] or 0),
+            }
+            for row in result.data
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get cost by SKU: {str(e)}",
+        )

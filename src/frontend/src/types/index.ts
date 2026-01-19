@@ -97,7 +97,20 @@ export interface TopJob {
   total_dbus: number;
   run_count: number;
   avg_cost_per_run: number;
+  primary_sku: string | null;
+  cloud: string | null;
   job_url: string | null;
+}
+
+export interface CostBySku {
+  sku_name: string;
+  cloud: string;
+  category: string;
+  unit_price: number;
+  total_dbus: number;
+  total_cost: number;
+  job_count: number;
+  workspace_count: number;
 }
 
 export interface CostByProject {

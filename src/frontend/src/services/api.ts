@@ -9,6 +9,7 @@ import type {
   CostSummary,
   DailyCost,
   TopJob,
+  CostBySku,
   CostByProject,
   CostByDepartment,
   CorrelationRate,
@@ -81,6 +82,9 @@ export const getCostTrends = (weeks: number = 8) =>
 
 export const getCorrelationRate = (days: number = 7) =>
   api.get<CorrelationRate>('/costs/correlation-rate', { params: { days } });
+
+export const getCostBySku = (days: number = 30, limit: number = 20) =>
+  api.get<CostBySku[]>('/costs/by-sku', { params: { days, limit } });
 
 // Health
 export const getFailedJobs = (days: number = 7, minRuns: number = 3, limit: number = 20) =>
