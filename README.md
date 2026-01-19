@@ -30,6 +30,28 @@ A comprehensive, plug-and-play solution combining job monitoring, cost attributi
 - **Intelligent Caching** - 5-minute TTL cache with manual refresh
 - **Circuit Breaker** - Automatic failover from Lakebase to SQL Warehouse
 
+## Prerequisites
+
+### Required System Tables
+
+This application requires access to the following Databricks system tables:
+
+| Table | Purpose |
+|-------|---------|
+| `system.lakeflow.job_run_timeline` | Job run history, status, duration |
+| `system.lakeflow.jobs` | Job metadata (names, creators) |
+| `system.billing.usage` | DBU consumption data |
+| `system.billing.list_prices` | Actual pricing per SKU |
+
+### Custom Tables (Optional)
+
+For tag correlation/cost attribution features:
+
+| Table | Purpose |
+|-------|---------|
+| `{catalog}.{schema}.serverless_tag_correlation` | Tag-to-job correlation |
+| `{catalog}.{schema}.tag_policy_definitions` | Tag policies |
+
 ## Quick Start
 
 ### One-Command Deployment
@@ -52,9 +74,28 @@ python deploy.py prod
 # 1. Build the application
 python build.py
 
-# 2. Deploy using Databricks CLI
+# 2. Upload to Databricks Workspace
+databricks workspace import-dir build/app /Workspace/Users/<your-email>/apps/unified-job-platform --overwrite
+
+# 3. Create the app (first time only)
 databricks apps create unified-job-platform
-databricks apps deploy unified-job-platform --source-code-path /Workspace/path/to/app
+
+# 4. Deploy the app
+databricks apps deploy unified-job-platform --source-code-path /Workspace/Users/<your-email>/apps/unified-job-platform
+
+# 5. Get app URL
+databricks apps get unified-job-platform --output json | jq -r '.url'
+```
+
+### Iterative Development
+
+For quick iterations during development:
+
+```bash
+# Build, upload, and deploy in one command
+python build.py && \
+databricks workspace import-dir build/app /Workspace/Users/<your-email>/apps/unified-job-platform --overwrite && \
+databricks apps deploy unified-job-platform --source-code-path /Workspace/Users/<your-email>/apps/unified-job-platform
 ```
 
 ## Architecture
@@ -220,7 +261,56 @@ databricks permissions update sql/warehouses/WAREHOUSE_ID --json '{
 GRANT USE CATALOG ON CATALOG hls_amer_catalog TO `<APP_CLIENT_ID>`;
 GRANT USE SCHEMA ON SCHEMA hls_amer_catalog.cost_management TO `<APP_CLIENT_ID>`;
 GRANT SELECT ON SCHEMA hls_amer_catalog.cost_management TO `<APP_CLIENT_ID>`;
+
+-- Grant access to system tables
+GRANT SELECT ON CATALOG system TO `<APP_CLIENT_ID>`;
 ```
+
+## System Table Schema Reference
+
+### system.lakeflow.job_run_timeline
+
+Key columns used by this application:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `job_id` | STRING | Job identifier |
+| `run_id` | STRING | Run identifier |
+| `period_start_time` | TIMESTAMP | Run start time |
+| `period_end_time` | TIMESTAMP | Run end time |
+| `result_state` | STRING | SUCCEEDED, FAILED, ERROR, RUNNING, etc. |
+| `execution_duration_seconds` | BIGINT | Execution duration |
+| `run_type` | STRING | JOB_RUN, SUBMIT_RUN, etc. |
+| `workspace_id` | STRING | Workspace identifier |
+
+### system.lakeflow.jobs
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `job_id` | STRING | Job identifier |
+| `name` | STRING | Job name |
+| `creator_user_name` | STRING | Creator's email |
+| `workspace_id` | STRING | Workspace identifier |
+
+### system.billing.usage
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `usage_date` | DATE | Usage date |
+| `sku_name` | STRING | SKU identifier |
+| `usage_quantity` | DECIMAL | DBU quantity |
+| `usage_metadata` | STRUCT | Contains job_id, job_name, etc. |
+| `workspace_id` | STRING | Workspace identifier |
+| `cloud` | STRING | AWS, AZURE, GCP |
+
+### system.billing.list_prices
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `sku_name` | STRING | SKU identifier |
+| `cloud` | STRING | AWS, AZURE, GCP |
+| `pricing` | STRUCT | Contains `default` price per DBU |
+| `price_end_time` | TIMESTAMP | NULL for current prices |
 
 ## UI Features
 
