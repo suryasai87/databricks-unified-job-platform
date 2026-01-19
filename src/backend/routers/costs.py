@@ -148,34 +148,22 @@ async def get_top_expensive_jobs(
     dl = get_data_layer()
     host = os.getenv("DATABRICKS_HOST", "fe-vm-hls-amer.cloud.databricks.com")
 
-    # Query with job name from system.lakeflow.jobs
+    # Query using job_name from usage_metadata (already available in billing table)
     query = f"""
-        WITH job_costs AS (
-            SELECT
-                usage_metadata.job_id AS job_id,
-                usage_metadata.workspace_id AS workspace_id,
-                FIRST_VALUE(usage_metadata.notebook_path) AS notebook_path,
-                COALESCE(SUM(usage_quantity * 0.15), 0) AS total_cost,
-                COALESCE(SUM(usage_quantity), 0) AS total_dbus,
-                COUNT(DISTINCT usage_metadata.job_run_id) AS run_count
-            FROM system.billing.usage
-            WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
-              AND product_features.is_serverless = TRUE
-              AND usage_metadata.job_id IS NOT NULL
-            GROUP BY usage_metadata.job_id, usage_metadata.workspace_id
-        )
         SELECT
-            jc.job_id,
-            jc.workspace_id,
-            j.name AS job_name,
-            jc.notebook_path,
-            jc.total_cost,
-            jc.total_dbus,
-            jc.run_count
-        FROM job_costs jc
-        LEFT JOIN system.lakeflow.jobs j
-            ON jc.job_id = j.job_id AND jc.workspace_id = j.workspace_id
-        ORDER BY jc.total_cost DESC
+            usage_metadata.job_id AS job_id,
+            workspace_id,
+            FIRST_VALUE(usage_metadata.job_name) AS job_name,
+            FIRST_VALUE(usage_metadata.notebook_path) AS notebook_path,
+            COALESCE(SUM(usage_quantity * 0.15), 0) AS total_cost,
+            COALESCE(SUM(usage_quantity), 0) AS total_dbus,
+            COUNT(DISTINCT usage_metadata.job_run_id) AS run_count
+        FROM system.billing.usage
+        WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
+          AND product_features.is_serverless = TRUE
+          AND usage_metadata.job_id IS NOT NULL
+        GROUP BY usage_metadata.job_id, workspace_id
+        ORDER BY total_cost DESC
         LIMIT {limit}
     """
 
@@ -185,7 +173,7 @@ async def get_top_expensive_jobs(
         return [
             {
                 "job_id": row[0],
-                "workspace_id": row[1],
+                "workspace_id": str(row[1]) if row[1] else None,
                 "job_name": row[2] or f"Job {row[0]}",
                 "notebook_path": row[3],
                 "total_cost": round(float(row[4] or 0), 2),
@@ -197,40 +185,10 @@ async def get_top_expensive_jobs(
             for row in result.data
         ]
     except Exception as e:
-        # Fallback if system.lakeflow.jobs is not available
-        fallback_query = f"""
-            SELECT
-                usage_metadata.job_id AS job_id,
-                usage_metadata.workspace_id AS workspace_id,
-                FIRST_VALUE(usage_metadata.notebook_path) AS notebook_path,
-                COALESCE(SUM(usage_quantity * 0.15), 0) AS total_cost,
-                COALESCE(SUM(usage_quantity), 0) AS total_dbus,
-                COUNT(DISTINCT usage_metadata.job_run_id) AS run_count
-            FROM system.billing.usage
-            WHERE usage_date >= CURRENT_DATE - INTERVAL {days} DAY
-              AND product_features.is_serverless = TRUE
-              AND usage_metadata.job_id IS NOT NULL
-            GROUP BY usage_metadata.job_id, usage_metadata.workspace_id
-            ORDER BY total_cost DESC
-            LIMIT {limit}
-        """
-
-        result = dl.execute_query(fallback_query)
-
-        return [
-            {
-                "job_id": row[0],
-                "workspace_id": row[1],
-                "job_name": f"Job {row[0]}",
-                "notebook_path": row[2],
-                "total_cost": round(float(row[3] or 0), 2),
-                "total_dbus": round(float(row[4] or 0), 2),
-                "run_count": int(row[5] or 0),
-                "avg_cost_per_run": round(float(row[3] or 0) / max(int(row[5] or 1), 1), 4),
-                "job_url": f"https://{host}/jobs/{row[0]}" if row[0] else None,
-            }
-            for row in result.data
-        ]
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get top jobs: {str(e)}",
+        )
 
 
 @router.get("/by-identity")
