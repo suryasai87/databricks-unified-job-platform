@@ -21,13 +21,9 @@ import {
 import {
   Dashboard,
   WorkHistory,
-  AttachMoney,
   HealthAndSafety,
-  GridView,
   Timeline,
   SmartToy,
-  LocalOffer,
-  Settings,
   Speed,
   Menu as MenuIcon,
   Bolt,
@@ -37,33 +33,21 @@ import { motion, AnimatePresence } from 'framer-motion';
 // Pages
 import DashboardPage from './pages/Dashboard';
 import JobsListPage from './pages/JobsList';
-import CostAnalyticsPage from './pages/CostAnalytics';
 import HealthPage from './pages/Health';
-import MatrixViewPage from './pages/MatrixView';
 import GanttViewPage from './pages/GanttView';
 import AIAssistantPage from './pages/AIAssistant';
-import TagCorrelationPage from './pages/TagCorrelation';
-import SettingsPage from './pages/Settings';
-
-// Components
-import { DataAccessError } from './components';
-
 // API
-import { getAuthStatus, checkDataAccess } from './services/api';
-import type { DataAccessStatus, User } from './types';
+import { getAuthStatus, getAppHealth } from './services/api';
+import type { User } from './types';
 
 const DRAWER_WIDTH = 260;
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: <Dashboard /> },
   { path: '/jobs', label: 'Jobs List', icon: <WorkHistory /> },
-  { path: '/costs', label: 'Cost Analytics', icon: <AttachMoney /> },
   { path: '/health', label: 'Health Monitor', icon: <HealthAndSafety /> },
-  { path: '/matrix', label: 'Matrix View', icon: <GridView /> },
   { path: '/gantt', label: 'Gantt View', icon: <Timeline /> },
-  { path: '/tags', label: 'Tag Correlation', icon: <LocalOffer /> },
   { path: '/ai', label: 'AI Assistant', icon: <SmartToy /> },
-  { path: '/settings', label: 'Settings', icon: <Settings /> },
 ];
 
 const App: React.FC = () => {
@@ -72,9 +56,7 @@ const App: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [dataAccess, setDataAccess] = useState<DataAccessStatus | null>(null);
-  const [dataAccessLoading, setDataAccessLoading] = useState(true);
-  const [dataSource, setDataSource] = useState<string>('checking...');
+  const [dataSource, setDataSource] = useState<string>('warehouse');
 
   useEffect(() => {
     // Check auth status
@@ -85,34 +67,12 @@ const App: React.FC = () => {
       .catch(console.error)
       .finally(() => setAuthLoading(false));
 
-    // Check data access
-    checkDataAccessStatus();
-  }, []);
+    // Check data source
+    getAppHealth()
+      .then((res) => setDataSource(res.data.data_source))
+      .catch(() => {});
 
-  const checkDataAccessStatus = async () => {
-    setDataAccessLoading(true);
-    try {
-      const res = await checkDataAccess();
-      setDataAccess(res.data);
-      setDataSource(res.data.data_source || 'warehouse');
-    } catch (error: unknown) {
-      // Handle 403 or 500 errors
-      const axiosError = error as { response?: { data?: DataAccessStatus } };
-      if (axiosError.response?.data) {
-        setDataAccess(axiosError.response.data);
-      } else {
-        setDataAccess({
-          accessible: false,
-          error_code: 'CONNECTION_ERROR',
-          message: 'Failed to connect to the backend',
-          resolution: 'Check if the app is running correctly',
-          tables_affected: [],
-        });
-      }
-    } finally {
-      setDataAccessLoading(false);
-    }
-  };
+  }, []);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -212,7 +172,7 @@ const App: React.FC = () => {
   );
 
   // Show loading state
-  if (authLoading || dataAccessLoading) {
+  if (authLoading) {
     return (
       <Box
         sx={{
@@ -230,11 +190,6 @@ const App: React.FC = () => {
         </Typography>
       </Box>
     );
-  }
-
-  // Show data access error
-  if (dataAccess && !dataAccess.accessible) {
-    return <DataAccessError status={dataAccess} onRetry={checkDataAccessStatus} />;
   }
 
   return (
@@ -324,13 +279,9 @@ const App: React.FC = () => {
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/jobs" element={<JobsListPage />} />
-              <Route path="/costs" element={<CostAnalyticsPage />} />
               <Route path="/health" element={<HealthPage />} />
-              <Route path="/matrix" element={<MatrixViewPage />} />
               <Route path="/gantt" element={<GanttViewPage />} />
-              <Route path="/tags" element={<TagCorrelationPage />} />
               <Route path="/ai" element={<AIAssistantPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </motion.div>
         </AnimatePresence>

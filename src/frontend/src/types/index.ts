@@ -10,6 +10,7 @@ export interface AuthStatus {
   authenticated: boolean;
   user: User | null;
   auth_method: string;
+  workspace_host?: string;
 }
 
 // Data Access types
@@ -35,6 +36,7 @@ export interface JobRun {
   job_id: number;
   job_name: string | null;
   run_id: number;
+  workspace_id: string | null;
   result_state: string | null;
   run_type: string | null;
   start_time: string | null;
@@ -151,6 +153,7 @@ export interface ProlongedJob {
   job_id: number;
   job_name: string | null;
   run_id: number;
+  workspace_id: string | null;
   start_time: string;
   duration_seconds: number;
   avg_duration_seconds: number;
@@ -178,47 +181,6 @@ export interface SLAStatus {
   status: 'compliant' | 'at_risk' | 'non_compliant';
 }
 
-// Tag types
-export interface TagCorrelation {
-  correlation_id: number;
-  job_run_id: string | null;  // String format like "run_20251222151849_7452"
-  notebook_path: string | null;
-  adf_pipeline_name: string | null;
-  adf_run_id: string | null;
-  project_code: string | null;
-  department: string | null;
-  environment: string | null;
-  run_status: string | null;
-  run_start_time: string | null;
-}
-
-export interface TagPolicy {
-  tag_key: string;
-  tag_display_name: string | null;
-  tag_description: string | null;
-  tag_category: string | null;
-  is_required: boolean;
-  allowed_values: string[] | null;
-  default_value: string | null;
-  validation_regex: string | null;
-}
-
-export interface TagSummary {
-  total_records: number;
-  unique_projects: number;
-  unique_departments: number;
-  unique_pipelines: number;
-  tagging_completeness: {
-    project_code_pct: number;
-    department_pct: number;
-  };
-  run_status: {
-    successful: number;
-    failed: number;
-  };
-  setup_required?: boolean;
-  message?: string;
-}
 
 // Genie types
 export interface GenieSpace {
@@ -232,6 +194,16 @@ export interface GenieMessage {
   content: string;
   sql?: string;
   results?: Record<string, unknown>[];
+}
+
+// Gantt types
+export interface GanttBucketRow {
+  job_id: number;
+  job_name: string | null;
+  bucket: string;
+  succeeded: number;
+  failed: number;
+  running: number;
 }
 
 // Performance types

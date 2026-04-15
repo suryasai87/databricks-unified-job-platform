@@ -118,10 +118,10 @@ const AIAssistant: React.FC = () => {
               <Box sx={{ textAlign: 'center', py: 4 }}>
                 <SmartToy sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary" gutterBottom>
-                  Ask me about your jobs and costs
+                  Ask me about your jobs
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  I can help you analyze job performance, cost attribution, and more.
+                  I can help you analyze job performance, health metrics, and more.
                   Try one of the suggested questions to get started.
                 </Typography>
               </Box>

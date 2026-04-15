@@ -15,8 +15,12 @@ import {
   Alert,
   Chip,
   LinearProgress,
+  Link,
+  Tooltip,
+  IconButton,
+  CircularProgress,
 } from '@mui/material';
-import { Warning, Error as ErrorIcon, CheckCircle } from '@mui/icons-material';
+import { Warning, Error as ErrorIcon, CheckCircle, OpenInNew, Cancel } from '@mui/icons-material';
 
 import { MetricCard, StatusChip } from '../components';
 import {
@@ -24,19 +28,24 @@ import {
   getProlongedJobs,
   getAnomalies,
   getSLAStatus,
+  getWorkspaceUrls,
+  cancelJobRun,
 } from '../services/api';
 import type { FailedJob, ProlongedJob, Anomaly, SLAStatus } from '../types';
 
 const Health: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cancellingRuns, setCancellingRuns] = useState<Set<number>>(new Set());
 
   const [failedJobs, setFailedJobs] = useState<FailedJob[]>([]);
   const [prolongedJobs, setProlongedJobs] = useState<ProlongedJob[]>([]);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [slaStatus, setSLAStatus] = useState<SLAStatus[]>([]);
+  const [workspaceUrls, setWorkspaceUrls] = useState<Record<string, { name: string; url: string }>>({});
 
   useEffect(() => {
+    getWorkspaceUrls().then((res) => setWorkspaceUrls(res.data)).catch(() => {});
     loadData();
   }, []);
 
@@ -76,6 +85,41 @@ const Health: React.FC = () => {
     if (total === 0) return 100;
     return Math.round((slaCompliant / total) * 100);
   };
+
+  const jobUrl = (jobId: number, workspaceId: string | null) => {
+    if (!workspaceId || !workspaceUrls[workspaceId]) return null;
+    return `${workspaceUrls[workspaceId].url}/jobs/${jobId}/tasks?o=${workspaceId}`;
+  };
+
+  const handleCancelRun = async (runId: number, workspaceId: string | null) => {
+    if (!workspaceId) return;
+    if (!window.confirm(`Cancel run ${runId}?`)) return;
+
+    setCancellingRuns((prev) => new Set(prev).add(runId));
+    try {
+      await cancelJobRun(runId, workspaceId);
+      // Refresh prolonged jobs
+      const res = await getProlongedJobs(1.5, 2.0);
+      setProlongedJobs(res.data);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      alert(`Failed to cancel: ${axiosErr.response?.data?.detail || 'Unknown error'}`);
+    } finally {
+      setCancellingRuns((prev) => {
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
+      });
+    }
+  };
+
+  const JobNameCell = ({ name, jobId }: { name: string | null; jobId: number }) => (
+    <Tooltip title={name || `Job ${jobId}`} arrow>
+      <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+        {name || `Job ${jobId}`}
+      </Typography>
+    </Tooltip>
+  );
 
   const healthScore = getHealthScore();
 
@@ -167,9 +211,7 @@ const Health: React.FC = () => {
                     failedJobs.map((job) => (
                       <TableRow key={job.job_id} hover>
                         <TableCell>
-                          <Typography variant="body2" noWrap sx={{ maxWidth: 150 }}>
-                            {job.job_name || `Job ${job.job_id}`}
-                          </Typography>
+                          <JobNameCell name={job.job_name} jobId={job.job_id} />
                         </TableCell>
                         <TableCell align="right">
                           <Chip label={job.failed_runs} size="small" color="error" />
@@ -219,13 +261,14 @@ const Health: React.FC = () => {
                     <TableCell>Duration</TableCell>
                     <TableCell>Expected</TableCell>
                     <TableCell>Status</TableCell>
+                    <TableCell align="center">Action</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {loading ? (
                     Array.from({ length: 5 }).map((_, i) => (
                       <TableRow key={i}>
-                        {Array.from({ length: 4 }).map((_, j) => (
+                        {Array.from({ length: 5 }).map((_, j) => (
                           <TableCell key={j}>
                             <Skeleton variant="text" />
                           </TableCell>
@@ -233,27 +276,63 @@ const Health: React.FC = () => {
                       </TableRow>
                     ))
                   ) : prolongedJobs.length > 0 ? (
-                    prolongedJobs.map((job) => (
-                      <TableRow key={job.run_id} hover>
-                        <TableCell>
-                          <Typography variant="body2" noWrap sx={{ maxWidth: 150 }}>
-                            {job.job_name || `Job ${job.job_id}`}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{formatDuration(job.duration_seconds)}</TableCell>
-                        <TableCell>{formatDuration(job.avg_duration_seconds)}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={job.status}
-                            size="small"
-                            color={job.status === 'critical' ? 'error' : 'warning'}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    prolongedJobs.map((job) => {
+                      const url = jobUrl(job.job_id, job.workspace_id);
+                      return (
+                        <TableRow key={job.run_id} hover>
+                          <TableCell>
+                            {url ? (
+                              <Tooltip title={job.job_name || `Job ${job.job_id}`} arrow>
+                                <Link
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
+                                  noWrap
+                                >
+                                  <Typography variant="body2" noWrap sx={{ maxWidth: 150 }}>
+                                    {job.job_name || `Job ${job.job_id}`}
+                                  </Typography>
+                                  <OpenInNew sx={{ fontSize: 14 }} />
+                                </Link>
+                              </Tooltip>
+                            ) : (
+                              <JobNameCell name={job.job_name} jobId={job.job_id} />
+                            )}
+                          </TableCell>
+                          <TableCell>{formatDuration(job.duration_seconds)}</TableCell>
+                          <TableCell>{formatDuration(job.avg_duration_seconds)}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={job.status}
+                              size="small"
+                              color={job.status === 'critical' ? 'error' : 'warning'}
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip title="Cancel this run" arrow>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => handleCancelRun(job.run_id, job.workspace_id)}
+                                  disabled={cancellingRuns.has(job.run_id) || !job.workspace_id}
+                                >
+                                  {cancellingRuns.has(job.run_id) ? (
+                                    <CircularProgress size={18} />
+                                  ) : (
+                                    <Cancel fontSize="small" />
+                                  )}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} align="center">
+                      <TableCell colSpan={5} align="center">
                         <Typography color="success.main">No prolonged runs detected</Typography>
                       </TableCell>
                     </TableRow>
@@ -298,9 +377,7 @@ const Health: React.FC = () => {
                     slaStatus.slice(0, 20).map((job) => (
                       <TableRow key={job.job_id} hover>
                         <TableCell>
-                          <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                            {job.job_name || `Job ${job.job_id}`}
-                          </Typography>
+                          <JobNameCell name={job.job_name} jobId={job.job_id} />
                         </TableCell>
                         <TableCell align="right">{job.total_runs}</TableCell>
                         <TableCell align="right">{formatDuration(job.avg_duration_seconds)}</TableCell>

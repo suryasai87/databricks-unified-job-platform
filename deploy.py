@@ -216,7 +216,7 @@ class Deployer:
         print(f"  App Service Principal: {self.app_client_id}")
 
         # Grant warehouse access
-        warehouse_id = "4b28691c780d9875"
+        warehouse_id = os.environ.get("WAREHOUSE_ID", "<YOUR_WAREHOUSE_ID>")
         run_command([
             "databricks", "permissions", "update",
             f"sql/warehouses/{warehouse_id}",
@@ -230,9 +230,11 @@ class Deployer:
         ], check=False)
 
         print_warning("Unity Catalog permissions must be granted manually via SQL:")
-        print(f"  GRANT USE CATALOG ON CATALOG hls_amer_catalog TO `{self.app_client_id}`;")
-        print(f"  GRANT USE SCHEMA ON SCHEMA hls_amer_catalog.cost_management TO `{self.app_client_id}`;")
-        print(f"  GRANT SELECT ON SCHEMA hls_amer_catalog.cost_management TO `{self.app_client_id}`;")
+        catalog = os.environ.get("CATALOG", "<YOUR_CATALOG>")
+        schema = os.environ.get("SCHEMA", "cost_management")
+        print(f"  GRANT USE CATALOG ON CATALOG {catalog} TO `{self.app_client_id}`;")
+        print(f"  GRANT USE SCHEMA ON SCHEMA {catalog}.{schema} TO `{self.app_client_id}`;")
+        print(f"  GRANT SELECT ON SCHEMA {catalog}.{schema} TO `{self.app_client_id}`;")
 
         return True
 
@@ -264,18 +266,6 @@ class Deployer:
             print(f"Service Principal: {self.app_client_id}")
 
 
-def setup_infrastructure():
-    """Run infrastructure setup (create tables and views)."""
-    print_header("Setting up Infrastructure")
-
-    project_root = Path(__file__).parent.absolute()
-    sql_file = project_root / "sql" / "01_create_infrastructure.sql"
-
-    print("To set up the infrastructure, run the following in a Databricks notebook:")
-    print(f"\n%sql\n-- Execute the contents of: {sql_file}\n")
-    print("Or use the Databricks SQL editor to run the SQL script.")
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Deploy Unified Job Platform to Databricks"
@@ -288,11 +278,6 @@ def main():
         help="Deployment target (default: dev)",
     )
     parser.add_argument(
-        "--setup",
-        action="store_true",
-        help="Setup infrastructure only (create tables/views)",
-    )
-    parser.add_argument(
         "--profile",
         default="DEFAULT",
         help="Databricks CLI profile to use",
@@ -302,10 +287,6 @@ def main():
 
     if args.profile:
         os.environ["DATABRICKS_PROFILE"] = args.profile
-
-    if args.setup:
-        setup_infrastructure()
-        return 0
 
     deployer = Deployer(args.target)
     success = deployer.deploy()

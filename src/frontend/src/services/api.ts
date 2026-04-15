@@ -6,22 +6,13 @@ import type {
   JobRun,
   DailyRuns,
   MatrixJob,
-  CostSummary,
-  DailyCost,
-  TopJob,
-  CostBySku,
-  CostByProject,
-  CostByDepartment,
-  CorrelationRate,
   FailedJob,
   ProlongedJob,
   Anomaly,
   SLAStatus,
-  TagCorrelation,
-  TagPolicy,
-  TagSummary,
   GenieSpace,
   PerformanceStats,
+  GanttBucketRow,
 } from '../types';
 
 const api = axios.create({
@@ -29,19 +20,33 @@ const api = axios.create({
   timeout: 60000,
 });
 
+// Health
+export const getAppHealth = () => api.get<{ data_source: string }>('/health');
+
 // Auth
 export const getAuthStatus = () => api.get<AuthStatus>('/auth/status');
 
 // Data Access
 export const checkDataAccess = () => api.get<DataAccessStatus>('/data/access-check');
 export const getPerformanceStats = () => api.get<PerformanceStats>('/data/performance');
+export const getWorkspaceUrls = () => api.get<Record<string, { name: string; url: string }>>('/workspaces');
 
 // Jobs
 export const getRunSummary = (days: number = 7) =>
   api.get<RunSummary>('/jobs/summary', { params: { days } });
 
-export const getJobRuns = (days: number = 7, limit: number = 100, status?: string) =>
-  api.get<JobRun[]>('/jobs/runs', { params: { days, limit, status } });
+export const getJobRuns = (
+  days: number = 7,
+  limit: number = 100,
+  status?: string,
+  search?: string,
+  workspace_id?: string,
+  /** Rolling window (hours); when set, backend uses overlap with this window like /jobs/concurrent */
+  hours?: number,
+) => api.get<JobRun[]>('/jobs/runs', { params: { days, limit, status, search, workspace_id, hours } });
+
+export const cancelJobRun = (run_id: number, workspace_id: string) =>
+  api.post('/jobs/cancel', { run_id, workspace_id });
 
 export const getDailyRuns = (days: number = 30) =>
   api.get<DailyRuns[]>('/jobs/daily', { params: { days } });
@@ -58,33 +63,8 @@ export const getOverlaps = (hours: number = 24) =>
 export const getConcurrentJobs = (hours: number = 24) =>
   api.get('/jobs/concurrent', { params: { hours } });
 
-// Costs
-export const getCostSummary = (days: number = 30) =>
-  api.get<CostSummary>('/costs/summary', { params: { days } });
-
-export const getDailyCosts = (days: number = 30) =>
-  api.get<DailyCost[]>('/costs/daily', { params: { days } });
-
-export const getTopExpensiveJobs = (days: number = 30, limit: number = 10) =>
-  api.get<TopJob[]>('/costs/top-jobs', { params: { days, limit } });
-
-export const getCostByIdentity = (days: number = 30, limit: number = 20) =>
-  api.get('/costs/by-identity', { params: { days, limit } });
-
-export const getCostByProject = (days: number = 30) =>
-  api.get<CostByProject[]>('/costs/by-project', { params: { days } });
-
-export const getCostByDepartment = (days: number = 30) =>
-  api.get<CostByDepartment[]>('/costs/by-department', { params: { days } });
-
-export const getCostTrends = (weeks: number = 8) =>
-  api.get('/costs/trends', { params: { weeks } });
-
-export const getCorrelationRate = (days: number = 7) =>
-  api.get<CorrelationRate>('/costs/correlation-rate', { params: { days } });
-
-export const getCostBySku = (days: number = 30, limit: number = 20) =>
-  api.get<CostBySku[]>('/costs/by-sku', { params: { days, limit } });
+export const getGanttData = (hours: number = 24) =>
+  api.get<GanttBucketRow[]>('/jobs/gantt', { params: { hours } });
 
 // Health
 export const getFailedJobs = (days: number = 7, minRuns: number = 3, limit: number = 20) =>
@@ -108,22 +88,6 @@ export const getSLAStatus = (days: number = 7, slaMultiplier: number = 2.0) =>
 
 export const getDurationPercentiles = (days: number = 30) =>
   api.get('/health-metrics/duration-percentiles', { params: { days } });
-
-// Tags
-export const getTagCorrelations = (days: number = 7, limit: number = 100, projectCode?: string, department?: string) =>
-  api.get<TagCorrelation[]>('/tags/correlations', { params: { days, limit, project_code: projectCode, department } });
-
-export const getTagPolicies = (activeOnly: boolean = true) =>
-  api.get<TagPolicy[]>('/tags/policies', { params: { active_only: activeOnly } });
-
-export const getTagSummary = (days: number = 30) =>
-  api.get<TagSummary>('/tags/summary', { params: { days } });
-
-export const getTagsByPipeline = (days: number = 30, limit: number = 20) =>
-  api.get('/tags/by-pipeline', { params: { days, limit } });
-
-export const getUnmatchedRuns = (days: number = 7, limit: number = 50) =>
-  api.get('/tags/unmatched', { params: { days, limit } });
 
 // Genie
 export const getGenieSpaces = () => api.get<GenieSpace[]>('/genie/spaces');

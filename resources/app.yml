@@ -4,10 +4,8 @@ resources:
     unified-job-platform:
       name: unified-job-platform
       description: |
-        Enterprise Databricks Job Monitoring & Cost Attribution Platform
-        - Real-time job monitoring with Gantt and Matrix views
-        - Dynamic cost attribution for serverless workloads
-        - ADF pipeline integration for tag correlation
+        Enterprise Databricks Job Monitoring Platform
+        - Real-time job monitoring with Gantt views
         - AI-powered insights via Genie Spaces
         - Lakebase integration for sub-100ms query performance
       source_code_path: ${workspace.file_path}/app

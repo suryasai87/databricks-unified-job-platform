@@ -3,12 +3,15 @@
 Build Script for Unified Job Platform
 ======================================
 Builds the React frontend and packages with the FastAPI backend.
+Reads configuration from databricks.yml (single source of truth).
 """
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 
 def run_command(cmd: list, cwd: str = None):
@@ -21,13 +24,50 @@ def run_command(cmd: list, cwd: str = None):
     return result.stdout
 
 
+def load_config(project_root: Path, target: str = "dev") -> dict:
+    """Load variable values from databricks.yml for the given target."""
+    config_path = project_root / "databricks.yml"
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    # Start with top-level variable defaults
+    variables = {}
+    for key, val in config.get("variables", {}).items():
+        variables[key] = val.get("default", "") if isinstance(val, dict) else val
+
+    # Override with target-specific variables
+    target_config = config.get("targets", {}).get(target, {})
+    for key, val in target_config.get("variables", {}).items():
+        variables[key] = val
+
+    return variables
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build Unified Job Platform")
+    parser.add_argument("--target", default="dev", help="Target from databricks.yml (default: dev)")
+    args = parser.parse_args()
+
     project_root = Path(__file__).parent.absolute()
     frontend_dir = project_root / "src" / "frontend"
     backend_dir = project_root / "src" / "backend"
     build_dir = project_root / "build" / "app"
 
-    print("=" * 60)
+    # Load config from databricks.yml
+    config = load_config(project_root, args.target)
+    print(f"Using target: {args.target}")
+    print(f"  catalog: {config.get('catalog')}")
+    print(f"  schema: {config.get('schema')}")
+    print(f"  warehouse_id: {config.get('warehouse_id')}")
+    print(f"  lakebase_instance_name: {config.get('lakebase_instance_name') or '(not set)'}")
+
+    if not config.get("warehouse_id"):
+        print("\nError: warehouse_id is not set in databricks.yml. Set it under variables or targets.")
+        sys.exit(1)
+
+    print("\n" + "=" * 60)
     print("Unified Job Platform - Build Script")
     print("=" * 60)
 
@@ -67,7 +107,19 @@ def main():
 
     # Step 5: Create app.yaml
     print("\n[5/5] Creating app.yaml...")
-    app_yaml = """command:
+    lakebase_name = config.get("lakebase_instance_name", "")
+    env_vars = [
+        ("CATALOG", config.get("catalog", "main")),
+        ("SCHEMA", config.get("schema", "cost_management")),
+        ("WAREHOUSE_ID", config.get("warehouse_id", "")),
+        ("LAKEBASE_INSTANCE_NAME", lakebase_name),
+        ("LAKEBASE_ENABLED", "true" if lakebase_name else "false"),
+        ("CACHE_TTL", "300"),
+    ]
+    env_lines = "\n".join(
+        f"  - name: {name}\n    value: \"{value}\"" for name, value in env_vars if value
+    )
+    app_yaml = f"""command:
   - uvicorn
   - app:app
   - --host
@@ -76,20 +128,7 @@ def main():
   - "8000"
 
 env:
-  - name: DATABRICKS_HOST
-    value: fe-vm-hls-amer.cloud.databricks.com
-  - name: CATALOG
-    value: hls_amer_catalog
-  - name: SCHEMA
-    value: cost_management
-  - name: WAREHOUSE_ID
-    value: "4b28691c780d9875"
-  - name: LAKEBASE_INSTANCE_ID
-    value: "6b59171b-cee8-4acc-9209-6c848ffbfbfe"
-  - name: LAKEBASE_ENABLED
-    value: "true"
-  - name: CACHE_TTL
-    value: "300"
+{env_lines}
 """
     (build_dir / "app.yaml").write_text(app_yaml)
 

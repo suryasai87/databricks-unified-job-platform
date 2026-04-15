@@ -1,8 +1,7 @@
 """
 Unified Job Platform - FastAPI Backend
 =======================================
-Combines job monitoring, cost attribution, and serverless tagging
-with Lakebase integration for sub-100ms query performance.
+Job monitoring platform with Lakebase integration for sub-100ms query performance.
 """
 import os
 import time
@@ -18,15 +17,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Import routers
-from routers import jobs, costs, health, genie, tags
+from routers import jobs, health, genie
 from data.data_layer import UnifiedDataLayer
 
 # Configuration
-DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "fe-vm-hls-amer.cloud.databricks.com")
-CATALOG = os.getenv("CATALOG", "hls_amer_catalog")
+DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "")
+CATALOG = os.getenv("CATALOG", "main")
 SCHEMA = os.getenv("SCHEMA", "cost_management")
-WAREHOUSE_ID = os.getenv("WAREHOUSE_ID", "4b28691c780d9875")
-LAKEBASE_INSTANCE_ID = os.getenv("LAKEBASE_INSTANCE_ID", "6b59171b-cee8-4acc-9209-6c848ffbfbfe")
+WAREHOUSE_ID = os.getenv("WAREHOUSE_ID", "")
+LAKEBASE_INSTANCE_NAME = os.getenv("LAKEBASE_INSTANCE_NAME", "")
 LAKEBASE_ENABLED = os.getenv("LAKEBASE_ENABLED", "true").lower() == "true"
 CACHE_TTL = int(os.getenv("CACHE_TTL", "300"))
 
@@ -46,7 +45,7 @@ async def lifespan(app: FastAPI):
         warehouse_id=WAREHOUSE_ID,
         catalog=CATALOG,
         schema=SCHEMA,
-        lakebase_instance_id=LAKEBASE_INSTANCE_ID if LAKEBASE_ENABLED else None,
+        lakebase_instance_name=LAKEBASE_INSTANCE_NAME if LAKEBASE_ENABLED else None,
         cache_ttl=CACHE_TTL,
     )
 
@@ -62,7 +61,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Unified Job Platform",
-    description="Enterprise Databricks Job Monitoring & Cost Attribution Platform",
+    description="Enterprise Databricks Job Monitoring Platform",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -192,12 +191,23 @@ async def check_data_access():
         # Test access to key tables
         access_results = data_layer.check_table_access()
         all_accessible = all(r["accessible"] for r in access_results)
+        any_accessible = any(r["accessible"] for r in access_results)
 
         if all_accessible:
             return {
                 "accessible": True,
                 "data_source": data_layer.current_source,
                 "tables": access_results,
+            }
+        elif any_accessible:
+            # Partial access — allow the app to load with available tables
+            inaccessible = [r for r in access_results if not r["accessible"]]
+            return {
+                "accessible": True,
+                "partial": True,
+                "data_source": data_layer.current_source,
+                "tables": access_results,
+                "tables_unavailable": [r["table"] for r in inaccessible],
             }
         else:
             inaccessible = [r for r in access_results if not r["accessible"]]
@@ -236,12 +246,39 @@ async def get_performance_stats():
     return data_layer.get_performance_comparison()
 
 
+# Workspace URL lookup (cached)
+_workspace_urls: Dict[str, str] = {}
+_workspace_urls_loaded = False
+
+
+@app.get("/api/workspaces")
+async def get_workspace_urls():
+    """Get workspace_id -> workspace_url mapping from system.access.workspaces_latest."""
+    global _workspace_urls, _workspace_urls_loaded
+
+    if _workspace_urls_loaded:
+        return _workspace_urls
+
+    if not data_layer:
+        raise HTTPException(status_code=503, detail="Data layer not initialized")
+
+    try:
+        result = data_layer.execute_query(
+            f"SELECT workspace_id, workspace_name, workspace_url FROM {CATALOG}.{SCHEMA}.synced_workspaces WHERE status = 'RUNNING'",
+            use_cache=True,
+            lakebase_query=f"SELECT workspace_id::text, workspace_name, workspace_url FROM {SCHEMA}.lb_synced_workspaces WHERE status = 'RUNNING'",
+        )
+        _workspace_urls = {str(row[0]): {"name": row[1], "url": row[2]} for row in result.data}
+        _workspace_urls_loaded = True
+        return _workspace_urls
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load workspace URLs: {e}")
+
+
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
-app.include_router(costs.router, prefix="/api/costs", tags=["Costs"])
 app.include_router(health.router, prefix="/api/health-metrics", tags=["Health"])
 app.include_router(genie.router, prefix="/api/genie", tags=["AI Assistant"])
-app.include_router(tags.router, prefix="/api/tags", tags=["Tag Correlation"])
 
 
 # Serve static files (React frontend)

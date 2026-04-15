@@ -44,29 +44,26 @@ class UnifiedDataLayer:
     """
 
     # Table mappings: Unity Catalog -> Lakebase synced tables
+    # Synced tables live in database "jobs_monitor", schema "cost_management"
     TABLE_MAPPINGS = {
-        "system.lakeflow.jobs": "jobs_monitor.synced.jobs",
-        "system.lakeflow.job_run_timeline": "jobs_monitor.synced.job_run_timeline",
-        "system.lakeflow.job_task_run_timeline": "jobs_monitor.synced.job_task_run_timeline",
-        "system.billing.usage": "jobs_monitor.synced.billing_usage",
-        "system.billing.list_prices": "jobs_monitor.synced.list_prices",
-        "system.compute.clusters": "jobs_monitor.synced.clusters",
+        "system.lakeflow.jobs": "cost_management.lb_jobs_latest",
+        "system.lakeflow.job_run_timeline": "cost_management.lb_job_runs_latest",
     }
 
     def __init__(
         self,
         host: str,
         warehouse_id: str,
-        catalog: str = "hls_amer_catalog",
+        catalog: str = "main",
         schema: str = "cost_management",
-        lakebase_instance_id: Optional[str] = None,
+        lakebase_instance_name: Optional[str] = None,
         cache_ttl: int = 300,
     ):
         self.host = host
         self.warehouse_id = warehouse_id
         self.catalog = catalog
         self.schema = schema
-        self.lakebase_instance_id = lakebase_instance_id
+        self.lakebase_instance_name = lakebase_instance_name
         self.cache_ttl = cache_ttl
 
         # Initialize clients
@@ -87,18 +84,25 @@ class UnifiedDataLayer:
 
         # Initialize connections
         self._init_workspace_client()
-        if lakebase_instance_id:
+        if lakebase_instance_name:
             self._init_lakebase()
 
     def _init_workspace_client(self):
         """Initialize Databricks WorkspaceClient."""
         try:
-            config = Config(
-                host=f"https://{self.host}",
-                http_timeout_seconds=120,
-            )
-            self._workspace_client = WorkspaceClient(config=config)
-            print(f"WorkspaceClient initialized for {self.host}")
+            # Use default WorkspaceClient() to auto-discover auth from
+            # Databricks App runtime environment (M2M service principal).
+            # Only override host if DATABRICKS_HOST is not already set.
+            if os.getenv("DATABRICKS_HOST"):
+                self._workspace_client = WorkspaceClient()
+            else:
+                config = Config(
+                    host=f"https://{self.host}",
+                    http_timeout_seconds=120,
+                )
+                self._workspace_client = WorkspaceClient(config=config)
+            host = self._workspace_client.config.host
+            print(f"WorkspaceClient initialized for {host}")
         except Exception as e:
             print(f"Failed to initialize WorkspaceClient: {e}")
             raise
@@ -116,18 +120,23 @@ class UnifiedDataLayer:
                 print("Could not retrieve Lakebase connection info")
                 return
 
-            # Get token for authentication
-            token = os.getenv("DATABRICKS_TOKEN")
-            if not token:
-                # Try to get token from SDK config
-                try:
-                    token = self._workspace_client.config.token
-                except Exception:
-                    pass
+            # Get credentials for Lakebase
+            pg_user = os.getenv("LAKEBASE_USER", "")
+            pg_password = os.getenv("LAKEBASE_PASSWORD", "")
 
-            if not token:
-                print("No Databricks token available for Lakebase auth")
-                return
+            if not pg_user or not pg_password:
+                # Try database credential API
+                token = self._get_lakebase_token()
+                if not token:
+                    print("No Lakebase credentials available")
+                    return
+                # Use current identity as the user
+                try:
+                    me = self._workspace_client.current_user.me()
+                    pg_user = me.user_name or "token"
+                except Exception:
+                    pg_user = "token"
+                pg_password = token
 
             # Create connection pool
             self._lakebase_pool = pool.ThreadedConnectionPool(
@@ -136,8 +145,8 @@ class UnifiedDataLayer:
                 host=lakebase_info.get("host"),
                 port=lakebase_info.get("port", 5432),
                 database=lakebase_info.get("database", "postgres"),
-                user="token",
-                password=token,
+                user=pg_user,
+                password=pg_password,
                 sslmode="require",
                 connect_timeout=10,
                 options="-c statement_timeout=30000",
@@ -154,21 +163,53 @@ class UnifiedDataLayer:
     def _get_lakebase_connection_info(self) -> Optional[Dict[str, Any]]:
         """Get Lakebase instance connection details from Databricks API."""
         try:
-            # Use database API to get instance info
             response = self._workspace_client.api_client.do(
                 "GET",
-                f"/api/2.0/database/instances/{self.lakebase_instance_id}",
+                f"/api/2.0/database/instances/{self.lakebase_instance_name}",
             )
 
             if isinstance(response, dict):
                 return {
                     "host": response.get("read_write_dns") or response.get("dns"),
                     "port": 5432,
-                    "database": "postgres",
+                    "database": os.getenv("LAKEBASE_DATABASE", self.catalog),
                     "read_only_host": response.get("read_only_dns"),
                 }
         except Exception as e:
             print(f"Failed to get Lakebase info: {e}")
+
+        return None
+
+    def _get_lakebase_token(self) -> Optional[str]:
+        """Get a token for Lakebase authentication."""
+        import uuid
+
+        # Try env var first
+        token = os.getenv("DATABRICKS_TOKEN")
+        if token:
+            return token
+
+        # Try generating via database credential API (provisioned tier)
+        try:
+            if self.lakebase_instance_name:
+                response = self._workspace_client.api_client.do(
+                    "POST",
+                    "/api/2.0/database/credentials",
+                    body={
+                        "instance_names": [self.lakebase_instance_name],
+                        "request_id": str(uuid.uuid4()),
+                    },
+                )
+                if isinstance(response, dict) and response.get("token"):
+                    return response["token"]
+        except Exception as e:
+            print(f"Failed to generate database credential: {e}")
+
+        # Fall back to SDK config token
+        try:
+            return self._workspace_client.config.token
+        except Exception:
+            pass
 
         return None
 
@@ -206,15 +247,80 @@ class UnifiedDataLayer:
             print(f"Lakebase circuit breaker OPEN after {self._lakebase_failures} failures")
 
     def _translate_query_for_lakebase(self, query: str) -> str:
-        """Translate Unity Catalog table names to Lakebase synced table names."""
+        """Translate Databricks SQL syntax to PostgreSQL for Lakebase."""
+        import re
+
         translated = query
         for uc_table, lb_table in self.TABLE_MAPPINGS.items():
             translated = translated.replace(uc_table, lb_table)
 
         # Also translate custom catalog.schema tables
+        # In Lakebase, we're connected to jobs_monitor DB, so just use schema.table
         translated = translated.replace(
             f"{self.catalog}.{self.schema}.",
-            "jobs_monitor.cost_management."
+            f"{self.schema}."
+        )
+
+        # Translate INTERVAL syntax: INTERVAL N DAY/HOUR/WEEK -> INTERVAL 'N days/hours/weeks'
+        def _fix_interval(match):
+            value = match.group(1)
+            unit = match.group(2).lower() + "s"  # DAY -> days, HOUR -> hours
+            return f"INTERVAL '{value} {unit}'"
+
+        translated = re.sub(
+            r"INTERVAL\s+(\d+)\s+(DAY|HOUR|WEEK|MONTH|YEAR|MINUTE|SECOND)",
+            _fix_interval,
+            translated,
+            flags=re.IGNORECASE,
+        )
+
+        # Translate Databricks struct access to PostgreSQL JSONB syntax.
+        # Lakebase syncs Delta structs as JSONB columns.
+        _numeric_fields = {"default"}
+        _boolean_fields = {"is_serverless"}
+        _struct_columns = r"pricing|usage_metadata|identity_metadata|product_features"
+
+        def _cast_jsonb_field(accessor: str, field: str) -> str:
+            if field in _numeric_fields:
+                return f"({accessor})::numeric"
+            if field in _boolean_fields:
+                return f"({accessor})::boolean"
+            return accessor
+
+        def _struct_to_jsonb(match):
+            prefix = match.group(1)
+            struct = match.group(2)
+            field = match.group(3)
+            accessor = f"{prefix}.{struct}->>'{field}'"
+            return _cast_jsonb_field(accessor, field)
+
+        # alias.struct_col.field -> alias.struct_col->>'field'
+        translated = re.sub(
+            rf"\b(\w+)\.({_struct_columns})\.(\w+)\b",
+            _struct_to_jsonb,
+            translated,
+        )
+
+        # Bare struct_col.field (no alias) -> struct_col->>'field'
+        def _bare_struct_to_jsonb(match):
+            struct = match.group(1)
+            field = match.group(2)
+            accessor = f"{struct}->>'{field}'"
+            return _cast_jsonb_field(accessor, field)
+
+        translated = re.sub(
+            rf"(?<!\.)(?<!\w)\b({_struct_columns})\.(\w+)\b",
+            _bare_struct_to_jsonb,
+            translated,
+        )
+
+        # Translate FIRST_VALUE() to MIN() for PostgreSQL compatibility.
+        # Databricks allows FIRST_VALUE as aggregate; PG requires OVER clause.
+        translated = re.sub(
+            r"\bFIRST_VALUE\s*\(",
+            "MIN(",
+            translated,
+            flags=re.IGNORECASE,
         )
 
         return translated
@@ -244,21 +350,43 @@ class UnifiedDataLayer:
         """Clear all cached results."""
         self._cache.clear()
 
+    def _is_lakebase_eligible(self, query: str) -> bool:
+        """Check if a query only uses tables that are synced to Lakebase."""
+        import re
+
+        # Skip queries referencing custom catalog.schema tables (not synced)
+        catalog_schema = f"{self.catalog}.{self.schema}."
+        if catalog_schema in query:
+            return False
+
+        # Skip queries referencing system tables that aren't in TABLE_MAPPINGS
+        system_tables = re.findall(r"system\.\w+\.\w+", query)
+        if system_tables:
+            for table in system_tables:
+                if table not in self.TABLE_MAPPINGS:
+                    return False
+
+        # Must reference at least one mapped table
+        return any(t in query for t in self.TABLE_MAPPINGS)
+
     def execute_query(
         self,
         query: str,
         params: Optional[Dict] = None,
         use_cache: bool = True,
         prefer_lakebase: bool = True,
+        lakebase_query: Optional[str] = None,
     ) -> QueryResult:
         """
         Execute a query using the best available data source.
 
         Args:
-            query: SQL query to execute
+            query: SQL query (Databricks SQL syntax) — used for warehouse
             params: Optional query parameters
             use_cache: Whether to use caching
             prefer_lakebase: Whether to prefer Lakebase over SQL Warehouse
+            lakebase_query: Optional PostgreSQL query for Lakebase materialized views.
+                           When provided, this runs on Lakebase instead of translating `query`.
 
         Returns:
             QueryResult with columns, data, and metadata
@@ -271,9 +399,13 @@ class UnifiedDataLayer:
                 return cached
 
         # Try Lakebase first if available and preferred
-        if prefer_lakebase and self.lakebase_available:
+        use_lakebase = prefer_lakebase and self.lakebase_available
+        if use_lakebase and (lakebase_query or self._is_lakebase_eligible(query)):
             try:
-                result = self._execute_lakebase(query, params)
+                result = self._execute_lakebase(
+                    lakebase_query or query, params,
+                    skip_translate=bool(lakebase_query),
+                )
                 if use_cache:
                     self._set_cache(cache_key, result)
                 return result
@@ -287,7 +419,7 @@ class UnifiedDataLayer:
             self._set_cache(cache_key, result)
         return result
 
-    def _execute_lakebase(self, query: str, params: Optional[Dict] = None) -> QueryResult:
+    def _execute_lakebase(self, query: str, params: Optional[Dict] = None, skip_translate: bool = False) -> QueryResult:
         """Execute query on Lakebase PostgreSQL."""
         if not self._lakebase_pool:
             raise RuntimeError("Lakebase pool not initialized")
@@ -296,7 +428,7 @@ class UnifiedDataLayer:
         conn = self._lakebase_pool.getconn()
 
         try:
-            translated_query = self._translate_query_for_lakebase(query)
+            translated_query = query if skip_translate else self._translate_query_for_lakebase(query)
 
             with conn.cursor() as cursor:
                 cursor.execute(translated_query, params)
@@ -331,6 +463,7 @@ class UnifiedDataLayer:
             warehouse_id=self.warehouse_id,
             statement=query,
             wait_timeout="50s",
+            row_limit=10000,
         )
 
         execution_time = (time.time() - start_time) * 1000
@@ -358,10 +491,8 @@ class UnifiedDataLayer:
     def check_table_access(self) -> List[Dict[str, Any]]:
         """Check access to required tables."""
         tables_to_check = [
-            ("system.lakeflow.job_run_timeline", "Job run history"),
-            ("system.lakeflow.jobs", "Job definitions"),
-            ("system.billing.usage", "Billing data"),
-            (f"{self.catalog}.{self.schema}.serverless_tag_correlation", "Tag correlation"),
+            (f"{self.catalog}.{self.schema}.job_runs_latest", "Job run history"),
+            (f"{self.catalog}.{self.schema}.jobs_latest", "Job definitions"),
         ]
 
         results = []
@@ -385,7 +516,7 @@ class UnifiedDataLayer:
 
     def get_performance_comparison(self) -> Dict[str, Any]:
         """Compare query performance between Lakebase and SQL Warehouse."""
-        test_query = "SELECT COUNT(*) as cnt FROM system.lakeflow.jobs WHERE delete_time IS NULL"
+        test_query = f"SELECT COUNT(*) as cnt FROM {self.catalog}.{self.schema}.jobs_latest"
 
         results = {"lakebase": None, "warehouse": None, "speedup_factor": None}
 

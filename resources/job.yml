@@ -1,0 +1,32 @@
+resources:
+  jobs:
+    job-monitoring-refresh:
+      name: job-monitoring-refresh
+      description: "Refreshes SDP streaming tables/materialized views, then refreshes Lakebase synced tables"
+
+      # Run every hour at :00
+      trigger:
+        periodic:
+          interval: 1
+          unit: HOURS
+
+      tasks:
+        # Task 1: Refresh the SDP pipeline (streaming tables + materialized views)
+        - task_key: refresh_sdp_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.job-monitoring-sync.id}
+            full_refresh: false
+
+        # Task 2: Refresh Lakebase synced tables (after SDP completes)
+        - task_key: refresh_lakebase_sync
+          depends_on:
+            - task_key: refresh_sdp_pipeline
+          notebook_task:
+            notebook_path: ../src/pipeline/refresh_lakebase_sync.py
+            source: WORKSPACE
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              lakebase_instance_name: ${var.lakebase_instance_name}
+          existing_cluster_id: ""
+          libraries: []

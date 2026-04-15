@@ -9,6 +9,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+
 class FailedJob(BaseModel):
     job_id: int
     job_name: Optional[str]
@@ -22,6 +23,7 @@ class ProlongedJob(BaseModel):
     job_id: int
     job_name: Optional[str]
     run_id: int
+    workspace_id: Optional[str]
     start_time: str
     duration_seconds: float
     avg_duration_seconds: float
@@ -63,8 +65,8 @@ async def get_failed_jobs(
             COUNT(*) AS total_runs,
             SUM(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS failed_runs,
             MAX(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN CAST(r.period_start_time AS STRING) END) AS last_failure
-        FROM system.lakeflow.job_run_timeline r
-        LEFT JOIN system.lakeflow.jobs j
+        FROM {dl.catalog}.{dl.schema}.job_runs_latest r
+        LEFT JOIN {dl.catalog}.{dl.schema}.jobs_latest j
             ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
         WHERE r.period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
         GROUP BY r.job_id, j.name
@@ -74,7 +76,25 @@ async def get_failed_jobs(
         LIMIT {limit}
     """
 
-    result = dl.execute_query(query)
+    lb_query = f"""
+        SELECT
+            r.job_id::bigint AS job_id,
+            j.name AS job_name,
+            COUNT(*) AS total_runs,
+            SUM(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS failed_runs,
+            MAX(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN r.period_start_time::text END) AS last_failure
+        FROM {dl.schema}.lb_job_runs_latest r
+        LEFT JOIN {dl.schema}.lb_jobs_latest j
+            ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+        WHERE r.period_start_time >= CURRENT_DATE - INTERVAL '{days} days'
+        GROUP BY r.job_id, j.name
+        HAVING COUNT(*) >= {min_runs}
+           AND SUM(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) > 0
+        ORDER BY failed_runs DESC
+        LIMIT {limit}
+    """
+
+    result = dl.execute_query(query, lakebase_query=lb_query)
 
     return [
         FailedJob(
@@ -91,58 +111,62 @@ async def get_failed_jobs(
 
 @router.get("/prolonged-jobs", response_model=List[ProlongedJob])
 async def get_prolonged_jobs(
-    warning_multiplier: float = Query(1.5, ge=1.0, description="Warning threshold multiplier"),
-    critical_multiplier: float = Query(2.0, ge=1.0, description="Critical threshold multiplier"),
+    threshold_hours: float = Query(2.0, ge=0.5, description="Hours threshold to consider a job prolonged"),
 ):
-    """Get currently running jobs that exceed expected duration."""
+    """Get currently running jobs that have been running longer than the threshold."""
     dl = get_data_layer()
+    threshold_seconds = threshold_hours * 3600
 
     query = f"""
-        WITH running_jobs AS (
-            SELECT
-                CAST(r.job_id AS BIGINT) AS job_id,
-                j.name AS job_name,
-                CAST(r.run_id AS BIGINT) AS run_id,
-                r.period_start_time,
-                (UNIX_TIMESTAMP(CURRENT_TIMESTAMP) - UNIX_TIMESTAMP(r.period_start_time)) AS current_duration_seconds
-            FROM system.lakeflow.job_run_timeline r
-            LEFT JOIN system.lakeflow.jobs j
-                ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
-            WHERE r.result_state IS NULL OR r.result_state = 'RUNNING'
-        ),
-        historical_avg AS (
-            SELECT
-                job_id,
-                AVG(execution_duration_seconds) AS avg_duration_seconds
-            FROM system.lakeflow.job_run_timeline
-            WHERE result_state = 'SUCCEEDED'
-              AND period_start_time >= CURRENT_DATE - INTERVAL 30 DAY
-            GROUP BY job_id
-        )
         SELECT
-            r.job_id,
-            r.job_name,
-            r.run_id,
+            CAST(r.job_id AS BIGINT) AS job_id,
+            j.name AS job_name,
+            CAST(r.run_id AS BIGINT) AS run_id,
+            CAST(r.workspace_id AS STRING) AS workspace_id,
             CAST(r.period_start_time AS STRING) AS start_time,
-            r.current_duration_seconds,
-            COALESCE(h.avg_duration_seconds, 0) AS avg_duration_seconds
-        FROM running_jobs r
-        LEFT JOIN historical_avg h ON CAST(r.job_id AS STRING) = h.job_id
-        WHERE r.current_duration_seconds > COALESCE(h.avg_duration_seconds * {warning_multiplier}, 300)
-        ORDER BY r.current_duration_seconds DESC
+            (UNIX_TIMESTAMP(CURRENT_TIMESTAMP) - UNIX_TIMESTAMP(r.period_start_time)) AS current_duration_seconds,
+            0 AS avg_duration_seconds
+        FROM {dl.catalog}.{dl.schema}.job_runs_latest r
+        LEFT JOIN {dl.catalog}.{dl.schema}.jobs_latest j
+            ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+        WHERE r.result_state IS NULL
+          AND r.period_start_time >= CURRENT_DATE - INTERVAL 7 DAY
+          AND (UNIX_TIMESTAMP(CURRENT_TIMESTAMP) - UNIX_TIMESTAMP(r.period_start_time)) > {threshold_seconds}
+        ORDER BY current_duration_seconds DESC
+        LIMIT 50
     """
 
-    result = dl.execute_query(query)
+    lb_query = f"""
+        SELECT
+            r.job_id::bigint AS job_id,
+            j.name AS job_name,
+            r.run_id::bigint AS run_id,
+            r.workspace_id::text AS workspace_id,
+            r.period_start_time::text AS start_time,
+            EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.period_start_time)) AS current_duration_seconds,
+            0 AS avg_duration_seconds
+        FROM {dl.schema}.lb_job_runs_latest r
+        LEFT JOIN {dl.schema}.lb_jobs_latest j
+            ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+        WHERE r.result_state IS NULL
+          AND r.period_start_time >= CURRENT_DATE - INTERVAL '7 days'
+          AND EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.period_start_time)) > {threshold_seconds}
+        ORDER BY current_duration_seconds DESC
+        LIMIT 50
+    """
+
+    result = dl.execute_query(query, lakebase_query=lb_query)
 
     return [
         ProlongedJob(
             job_id=row[0],
             job_name=row[1],
             run_id=row[2],
-            start_time=row[3],
-            duration_seconds=float(row[4] or 0),
-            avg_duration_seconds=float(row[5] or 0),
-            status="critical" if float(row[4] or 0) > float(row[5] or 0) * critical_multiplier else "warning",
+            workspace_id=row[3],
+            start_time=row[4],
+            duration_seconds=float(row[5] or 0),
+            avg_duration_seconds=float(row[6] or 0),
+            status="critical",
         )
         for row in result.data
     ]
@@ -165,8 +189,8 @@ async def get_anomalies(
                 AVG(r.execution_duration_seconds) AS recent_avg_duration,
                 COUNT(*) AS recent_runs,
                 SUM(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS recent_failures
-            FROM system.lakeflow.job_run_timeline r
-            LEFT JOIN system.lakeflow.jobs j
+            FROM {dl.catalog}.{dl.schema}.job_runs_latest r
+            LEFT JOIN {dl.catalog}.{dl.schema}.jobs_latest j
                 ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
             WHERE r.period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
               AND r.result_state IN ('SUCCEEDED', 'FAILED', 'ERROR', 'TIMED_OUT')
@@ -178,7 +202,7 @@ async def get_anomalies(
                 AVG(execution_duration_seconds) AS baseline_avg_duration,
                 STDDEV(execution_duration_seconds) AS baseline_stddev_duration,
                 COUNT(*) AS baseline_runs
-            FROM system.lakeflow.job_run_timeline
+            FROM {dl.catalog}.{dl.schema}.job_runs_latest
             WHERE period_start_time >= CURRENT_DATE - INTERVAL {baseline_days} DAY
               AND period_start_time < CURRENT_DATE - INTERVAL {days} DAY
               AND result_state IN ('SUCCEEDED', 'FAILED', 'ERROR', 'TIMED_OUT')
@@ -205,7 +229,56 @@ async def get_anomalies(
         LIMIT 20
     """
 
-    result = dl.execute_query(query)
+    lb_query = f"""
+        WITH
+        recent_stats AS (
+            SELECT
+                r.job_id,
+                j.name AS job_name,
+                AVG(r.execution_duration_seconds) AS recent_avg_duration,
+                COUNT(*) AS recent_runs,
+                SUM(CASE WHEN r.result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS recent_failures
+            FROM {dl.schema}.lb_job_runs_latest r
+            LEFT JOIN {dl.schema}.lb_jobs_latest j
+                ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+            WHERE r.period_start_time >= CURRENT_DATE - INTERVAL '{days} days'
+              AND r.result_state IN ('SUCCEEDED', 'FAILED', 'ERROR', 'TIMED_OUT')
+            GROUP BY r.job_id, j.name
+        ),
+        baseline_stats AS (
+            SELECT
+                job_id,
+                AVG(execution_duration_seconds) AS baseline_avg_duration,
+                STDDEV(execution_duration_seconds) AS baseline_stddev_duration,
+                COUNT(*) AS baseline_runs
+            FROM {dl.schema}.lb_job_runs_latest
+            WHERE period_start_time >= CURRENT_DATE - INTERVAL '{baseline_days} days'
+              AND period_start_time < CURRENT_DATE - INTERVAL '{days} days'
+              AND result_state IN ('SUCCEEDED', 'FAILED', 'ERROR', 'TIMED_OUT')
+            GROUP BY job_id
+            HAVING COUNT(*) >= 5
+        )
+        SELECT
+            r.job_id::bigint AS job_id,
+            r.job_name,
+            'duration' AS metric,
+            r.recent_avg_duration AS current_value,
+            b.baseline_avg_duration AS avg_value,
+            b.baseline_stddev_duration AS std_dev,
+            CASE
+                WHEN b.baseline_stddev_duration > 0
+                THEN (r.recent_avg_duration - b.baseline_avg_duration) / b.baseline_stddev_duration
+                ELSE 0
+            END AS z_score
+        FROM recent_stats r
+        JOIN baseline_stats b ON r.job_id = b.job_id
+        WHERE b.baseline_stddev_duration > 0
+          AND ABS((r.recent_avg_duration - b.baseline_avg_duration) / b.baseline_stddev_duration) >= {z_threshold}
+        ORDER BY ABS((r.recent_avg_duration - b.baseline_avg_duration) / b.baseline_stddev_duration) DESC
+        LIMIT 20
+    """
+
+    result = dl.execute_query(query, lakebase_query=lb_query)
 
     return [
         Anomaly(
@@ -239,8 +312,8 @@ async def get_retry_stats(
                 CAST(r.run_id AS BIGINT) AS run_id,
                 r.result_state,
                 r.period_start_time
-            FROM system.lakeflow.job_run_timeline r
-            LEFT JOIN system.lakeflow.jobs j
+            FROM {dl.catalog}.{dl.schema}.job_runs_latest r
+            LEFT JOIN {dl.catalog}.{dl.schema}.jobs_latest j
                 ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
             WHERE r.period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
         ),
@@ -267,7 +340,44 @@ async def get_retry_stats(
         LIMIT {limit}
     """
 
-    result = dl.execute_query(query)
+    lb_query = f"""
+        WITH
+        job_runs AS (
+            SELECT
+                r.job_id::bigint AS job_id,
+                j.name AS job_name,
+                r.run_id::bigint AS run_id,
+                r.result_state,
+                r.period_start_time
+            FROM {dl.schema}.lb_job_runs_latest r
+            LEFT JOIN {dl.schema}.lb_jobs_latest j
+                ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+            WHERE r.period_start_time >= CURRENT_DATE - INTERVAL '{days} days'
+        ),
+        job_stats AS (
+            SELECT
+                job_id,
+                job_name,
+                COUNT(DISTINCT run_id) AS unique_runs,
+                SUM(CASE WHEN result_state IN ('FAILED', 'ERROR', 'TIMED_OUT') THEN 1 ELSE 0 END) AS failed_runs,
+                SUM(CASE WHEN result_state = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded_runs
+            FROM job_runs
+            GROUP BY job_id, job_name
+        )
+        SELECT
+            job_id,
+            job_name,
+            unique_runs,
+            unique_runs AS total_attempts,
+            failed_runs AS retry_attempts,
+            CASE WHEN failed_runs > 0 THEN unique_runs ELSE 1 END AS max_attempts
+        FROM job_stats
+        WHERE failed_runs > 0 AND succeeded_runs > 0
+        ORDER BY failed_runs DESC
+        LIMIT {limit}
+    """
+
+    result = dl.execute_query(query, lakebase_query=lb_query)
 
     return [
         {
@@ -297,8 +407,8 @@ async def get_sla_status(
                 CAST(r.job_id AS BIGINT) AS job_id,
                 j.name AS job_name,
                 r.execution_duration_seconds AS duration_seconds
-            FROM system.lakeflow.job_run_timeline r
-            LEFT JOIN system.lakeflow.jobs j
+            FROM {dl.catalog}.{dl.schema}.job_runs_latest r
+            LEFT JOIN {dl.catalog}.{dl.schema}.jobs_latest j
                 ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
             WHERE r.period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
               AND r.result_state = 'SUCCEEDED'
@@ -334,7 +444,51 @@ async def get_sla_status(
         LIMIT 50
     """
 
-    result = dl.execute_query(query)
+    lb_query = f"""
+        WITH
+        job_durations AS (
+            SELECT
+                r.job_id::bigint AS job_id,
+                j.name AS job_name,
+                r.execution_duration_seconds AS duration_seconds
+            FROM {dl.schema}.lb_job_runs_latest r
+            LEFT JOIN {dl.schema}.lb_jobs_latest j
+                ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+            WHERE r.period_start_time >= CURRENT_DATE - INTERVAL '{days} days'
+              AND r.result_state = 'SUCCEEDED'
+        ),
+        job_stats AS (
+            SELECT
+                job_id,
+                job_name,
+                COUNT(*) AS total_runs,
+                AVG(duration_seconds) AS avg_duration
+            FROM job_durations
+            GROUP BY job_id, job_name
+        ),
+        sla_violations AS (
+            SELECT
+                d.job_id,
+                COUNT(*) AS violation_count
+            FROM job_durations d
+            JOIN job_stats s ON d.job_id = s.job_id
+            WHERE d.duration_seconds > s.avg_duration * {sla_multiplier}
+            GROUP BY d.job_id
+        )
+        SELECT
+            s.job_id,
+            s.job_name,
+            s.total_runs,
+            ROUND(s.avg_duration::numeric, 2) AS avg_duration_seconds,
+            COALESCE(v.violation_count, 0) AS sla_violations,
+            ROUND((s.total_runs - COALESCE(v.violation_count, 0)) * 100.0 / s.total_runs, 2) AS compliance_rate
+        FROM job_stats s
+        LEFT JOIN sla_violations v ON s.job_id = v.job_id
+        ORDER BY sla_violations DESC NULLS LAST, s.total_runs DESC
+        LIMIT 50
+    """
+
+    result = dl.execute_query(query, lakebase_query=lb_query)
 
     return [
         {
@@ -366,8 +520,8 @@ async def get_duration_percentiles(
             ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY r.execution_duration_seconds), 2) AS p90,
             ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r.execution_duration_seconds), 2) AS p95,
             ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY r.execution_duration_seconds), 2) AS p99
-        FROM system.lakeflow.job_run_timeline r
-        LEFT JOIN system.lakeflow.jobs j
+        FROM {dl.catalog}.{dl.schema}.job_runs_latest r
+        LEFT JOIN {dl.catalog}.{dl.schema}.jobs_latest j
             ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
         WHERE r.period_start_time >= CURRENT_DATE - INTERVAL {days} DAY
           AND r.result_state = 'SUCCEEDED'
@@ -377,7 +531,27 @@ async def get_duration_percentiles(
         LIMIT 50
     """
 
-    result = dl.execute_query(query)
+    lb_query = f"""
+        SELECT
+            r.job_id::bigint AS job_id,
+            j.name AS job_name,
+            COUNT(*) AS run_count,
+            ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY r.execution_duration_seconds)::numeric, 2) AS p50,
+            ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY r.execution_duration_seconds)::numeric, 2) AS p90,
+            ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r.execution_duration_seconds)::numeric, 2) AS p95,
+            ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY r.execution_duration_seconds)::numeric, 2) AS p99
+        FROM {dl.schema}.lb_job_runs_latest r
+        LEFT JOIN {dl.schema}.lb_jobs_latest j
+            ON r.job_id = j.job_id AND r.workspace_id = j.workspace_id
+        WHERE r.period_start_time >= CURRENT_DATE - INTERVAL '{days} days'
+          AND r.result_state = 'SUCCEEDED'
+        GROUP BY r.job_id, j.name
+        HAVING COUNT(*) >= 5
+        ORDER BY p50 DESC
+        LIMIT 50
+    """
+
+    result = dl.execute_query(query, lakebase_query=lb_query)
 
     return [
         {

@@ -114,9 +114,9 @@ async def send_message(conversation_id: str, request: MessageRequest):
 
             # If still processing, poll for completion
             if status in ["EXECUTING_QUERY", "PENDING"]:
-                import time
+                import asyncio
                 for _ in range(30):  # Max 30 seconds
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     poll_response = client.api_client.do(
                         "GET",
                         f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}",
@@ -200,30 +200,12 @@ async def get_suggested_questions():
                 ],
             },
             {
-                "name": "Cost Analysis",
-                "questions": [
-                    "What is the total cost by department this month?",
-                    "Which projects have the highest serverless compute costs?",
-                    "Show me the daily cost trend for the last 30 days",
-                    "What percentage of costs are untagged?",
-                ],
-            },
-            {
                 "name": "Performance",
                 "questions": [
                     "Which jobs have the most retries?",
                     "Show duration percentiles for all jobs",
                     "Are there any anomalies in job execution times?",
                     "What is the SLA compliance rate?",
-                ],
-            },
-            {
-                "name": "ADF Integration",
-                "questions": [
-                    "Show tag correlation rate for ADF pipelines",
-                    "Which ADF pipelines have the most job runs?",
-                    "List unmatched serverless runs",
-                    "What is the cost by ADF pipeline?",
                 ],
             },
         ],

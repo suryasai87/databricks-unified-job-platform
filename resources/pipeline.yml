@@ -1,0 +1,15 @@
+resources:
+  pipelines:
+    job-monitoring-sync:
+      name: job-monitoring-sync
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      photon: true
+      channel: CURRENT
+      edition: ADVANCED
+      continuous: false
+      development: true
+      libraries:
+        - notebook:
+            path: ../src/pipeline/job_monitoring_pipeline.py

@@ -36,7 +36,7 @@ const DataAccessError: React.FC<DataAccessErrorProps> = ({ status, onRetry }) =>
 APP_CLIENT_ID=$(databricks apps get unified-job-platform --output json | jq -r '.service_principal_client_id')
 
 # Grant SQL Warehouse access
-databricks permissions update sql/warehouses 4b28691c780d9875 --json '{
+databricks permissions update sql/warehouses/<WAREHOUSE_ID> --json '{
   "access_control_list": [{
     "service_principal_name": "'$APP_CLIENT_ID'",
     "permission_level": "CAN_USE"
@@ -44,14 +44,13 @@ databricks permissions update sql/warehouses 4b28691c780d9875 --json '{
 }'
 
 # Grant Unity Catalog access (run in Databricks SQL)
-GRANT USE CATALOG ON CATALOG hls_amer_catalog TO \`$APP_CLIENT_ID\`;
-GRANT USE SCHEMA ON SCHEMA hls_amer_catalog.cost_management TO \`$APP_CLIENT_ID\`;
-GRANT SELECT ON SCHEMA hls_amer_catalog.cost_management TO \`$APP_CLIENT_ID\`;
+GRANT USE CATALOG ON CATALOG <YOUR_CATALOG> TO \`$APP_CLIENT_ID\`;
+GRANT USE SCHEMA ON SCHEMA <YOUR_CATALOG>.cost_management TO \`$APP_CLIENT_ID\`;
+GRANT SELECT ON SCHEMA <YOUR_CATALOG>.cost_management TO \`$APP_CLIENT_ID\`;
 
 # For system tables (run in Databricks SQL)
 GRANT SELECT ON TABLE system.lakeflow.job_run_timeline TO \`$APP_CLIENT_ID\`;
-GRANT SELECT ON TABLE system.lakeflow.jobs TO \`$APP_CLIENT_ID\`;
-GRANT SELECT ON TABLE system.billing.usage TO \`$APP_CLIENT_ID\`;`;
+GRANT SELECT ON TABLE system.lakeflow.jobs TO \`$APP_CLIENT_ID\`;`;
 
     return commands;
   };
