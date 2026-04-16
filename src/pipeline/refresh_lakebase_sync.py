@@ -7,6 +7,11 @@
 
 # COMMAND ----------
 
+%pip install --upgrade databricks-sdk
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 dbutils.widgets.text("catalog", "main", "Unity Catalog name")
 dbutils.widgets.text("schema", "cost_management", "Schema name")
 
@@ -27,8 +32,8 @@ w = WorkspaceClient()
 
 for table_name in SYNCED_TABLES:
     print(f"Refreshing {table_name}...")
-    synced_table = w.postgres.get_synced_table(f"synced_tables/{table_name}")
-    pipeline_id = synced_table.status.pipeline_id
+    synced_table = w.database.get_synced_database_table(table_name)
+    pipeline_id = synced_table.data_synchronization_status.pipeline_id
     w.pipelines.start_update(pipeline_id=pipeline_id)
     print(f"  Triggered pipeline {pipeline_id}")
 
