@@ -91,6 +91,8 @@ Create three synced tables in your Lakebase instance following the [Databricks s
 
 Once the tables are created, the `job-monitoring-refresh` job will refresh them on every hourly run. Make sure `lakebase_instance_name` is set in `databricks.yml` so the refresh job can locate the instance.
 
+Add the Lakebase database as an app resource through app authorization. In your app's settings, go to **Authorization** and add the Lakebase database instance as a resource. This allows the app's service principal to authenticate with Lakebase.
+
 Grant the app's service principal access to the Lakebase schema (run against your Lakebase instance):
 
 ```sql
