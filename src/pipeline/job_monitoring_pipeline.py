@@ -16,7 +16,7 @@ from pyspark.sql.window import Window
     comment="Raw job run timeline from system.lakeflow.job_run_timeline",
 )
 def synced_job_run_timeline():
-    return spark.readStream.table("system.lakeflow.job_run_timeline")
+    return spark.readStream.option("skipChangeCommits", "true").table("system.lakeflow.job_run_timeline")
 
 
 @dlt.table(
@@ -24,7 +24,7 @@ def synced_job_run_timeline():
     comment="Raw jobs changelog from system.lakeflow.jobs",
 )
 def synced_jobs():
-    return spark.readStream.table("system.lakeflow.jobs")
+    return spark.readStream.option("skipChangeCommits", "true").table("system.lakeflow.jobs")
 
 
 # Use a materialized view instead of a streaming table for workspaces_latest.
