@@ -6,6 +6,7 @@ resources:
 
       # Run every hour at :00
       trigger:
+        pause_status: UNPAUSED
         periodic:
           interval: 1
           unit: HOURS

@@ -108,10 +108,15 @@ class UnifiedDataLayer:
             raise
 
     def _init_lakebase(self):
-        """Initialize Lakebase PostgreSQL connection pool."""
+        """Initialize Lakebase PostgreSQL connection pool with automatic token refresh.
+
+        Uses psycopg3's ConnectionPool with a custom connection class that
+        generates a fresh OAuth token on every new connection, avoiding the
+        stale-token problem (tokens expire after 1 hour).
+        """
         try:
-            import psycopg2
-            from psycopg2 import pool
+            import psycopg
+            from psycopg_pool import ConnectionPool
 
             # Get Lakebase connection info from Databricks API
             lakebase_info = self._get_lakebase_connection_info()
@@ -120,43 +125,90 @@ class UnifiedDataLayer:
                 print("Could not retrieve Lakebase connection info")
                 return
 
-            # Get credentials for Lakebase
+            # Determine the PostgreSQL user identity
             pg_user = os.getenv("LAKEBASE_USER", "")
-            pg_password = os.getenv("LAKEBASE_PASSWORD", "")
-
-            if not pg_user or not pg_password:
-                # Try database credential API
-                token = self._get_lakebase_token()
-                if not token:
-                    print("No Lakebase credentials available")
-                    return
-                # Use current identity as the user
+            if not pg_user:
                 try:
                     me = self._workspace_client.current_user.me()
                     pg_user = me.user_name or "token"
                 except Exception:
                     pg_user = "token"
-                pg_password = token
 
-            # Create connection pool
-            self._lakebase_pool = pool.ThreadedConnectionPool(
-                minconn=2,
-                maxconn=10,
-                host=lakebase_info.get("host"),
-                port=lakebase_info.get("port", 5432),
-                database=lakebase_info.get("database", "postgres"),
-                user=pg_user,
-                password=pg_password,
-                sslmode="require",
-                connect_timeout=10,
-                options="-c statement_timeout=30000",
-            )
+            host = lakebase_info.get("host")
+            port = lakebase_info.get("port", 5432)
+            database = lakebase_info.get("database", "postgres")
+
+            # Check for static password (non-expiring native Postgres password)
+            static_password = os.getenv("LAKEBASE_PASSWORD", "")
+
+            if static_password:
+                # Static credentials — no token refresh needed
+                conninfo = (
+                    f"host={host} port={port} dbname={database} "
+                    f"user={pg_user} password={static_password} "
+                    f"sslmode=require connect_timeout=10 "
+                    f"options='-c statement_timeout=30000'"
+                )
+                self._lakebase_pool = ConnectionPool(
+                    conninfo=conninfo,
+                    min_size=2,
+                    max_size=10,
+                    open=True,
+                )
+            else:
+                # OAuth token auth — generate a fresh token per connection
+                workspace_client = self._workspace_client
+                instance_name = self.lakebase_instance_name
+
+                class OAuthConnection(psycopg.Connection):
+                    """Connection subclass that fetches a fresh OAuth token on connect."""
+                    @classmethod
+                    def connect(cls, conninfo='', **kwargs):
+                        import uuid
+                        try:
+                            cred = workspace_client.api_client.do(
+                                "POST",
+                                "/api/2.0/database/credentials",
+                                body={
+                                    "instance_names": [instance_name],
+                                    "request_id": str(uuid.uuid4()),
+                                },
+                            )
+                            token = cred.get("token") if isinstance(cred, dict) else None
+                            if token:
+                                print("Lakebase: obtained fresh credential via database API")
+                            else:
+                                print("Lakebase: credential API returned no token")
+                        except Exception as e:
+                            print(f"Lakebase: credential API failed: {e}")
+                            token = None
+
+                        if not token:
+                            print("Lakebase: falling back to SDK config token")
+                            token = workspace_client.config.token
+
+                        kwargs["password"] = token
+                        return super().connect(conninfo, **kwargs)
+
+                conninfo = (
+                    f"host={host} port={port} dbname={database} "
+                    f"user={pg_user} sslmode=require connect_timeout=10 "
+                    f"options='-c statement_timeout=30000'"
+                )
+                self._lakebase_pool = ConnectionPool(
+                    conninfo=conninfo,
+                    connection_class=OAuthConnection,
+                    min_size=1,
+                    max_size=10,
+                    max_idle=600,
+                    open=True,
+                )
 
             self._lakebase_available = True
-            print(f"Lakebase connection pool initialized: {lakebase_info.get('host')}")
+            print(f"Lakebase connection pool initialized: {host}")
 
         except ImportError:
-            print("psycopg2 not installed - Lakebase disabled")
+            print("psycopg[pool] not installed - Lakebase disabled")
         except Exception as e:
             print(f"Failed to initialize Lakebase: {e}")
 
@@ -177,39 +229,6 @@ class UnifiedDataLayer:
                 }
         except Exception as e:
             print(f"Failed to get Lakebase info: {e}")
-
-        return None
-
-    def _get_lakebase_token(self) -> Optional[str]:
-        """Get a token for Lakebase authentication."""
-        import uuid
-
-        # Try env var first
-        token = os.getenv("DATABRICKS_TOKEN")
-        if token:
-            return token
-
-        # Try generating via database credential API (provisioned tier)
-        try:
-            if self.lakebase_instance_name:
-                response = self._workspace_client.api_client.do(
-                    "POST",
-                    "/api/2.0/database/credentials",
-                    body={
-                        "instance_names": [self.lakebase_instance_name],
-                        "request_id": str(uuid.uuid4()),
-                    },
-                )
-                if isinstance(response, dict) and response.get("token"):
-                    return response["token"]
-        except Exception as e:
-            print(f"Failed to generate database credential: {e}")
-
-        # Fall back to SDK config token
-        try:
-            return self._workspace_client.config.token
-        except Exception:
-            pass
 
         return None
 
@@ -425,27 +444,22 @@ class UnifiedDataLayer:
             raise RuntimeError("Lakebase pool not initialized")
 
         start_time = time.time()
-        conn = self._lakebase_pool.getconn()
+        translated_query = query if skip_translate else self._translate_query_for_lakebase(query)
 
-        try:
-            translated_query = query if skip_translate else self._translate_query_for_lakebase(query)
-
+        with self._lakebase_pool.connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(translated_query, params)
                 columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 data = cursor.fetchall() if cursor.description else []
 
-            execution_time = (time.time() - start_time) * 1000
+        execution_time = (time.time() - start_time) * 1000
 
-            return QueryResult(
-                columns=columns,
-                data=[list(row) for row in data],
-                source=DataSource.LAKEBASE,
-                execution_time_ms=execution_time,
-            )
-
-        finally:
-            self._lakebase_pool.putconn(conn)
+        return QueryResult(
+            columns=columns,
+            data=[list(row) for row in data],
+            source=DataSource.LAKEBASE,
+            execution_time_ms=execution_time,
+        )
 
     def _execute_warehouse(self, query: str, params: Optional[Dict] = None) -> QueryResult:
         """Execute query on SQL Warehouse."""
@@ -555,5 +569,5 @@ class UnifiedDataLayer:
     def close(self):
         """Close all connections."""
         if self._lakebase_pool:
-            self._lakebase_pool.closeall()
+            self._lakebase_pool.close()
             print("Lakebase connection pool closed")
