@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Import routers
-from routers import jobs, health, genie
+from routers import jobs, health, genie, costs
 from data.data_layer import UnifiedDataLayer
 
 # Configuration
@@ -279,6 +279,7 @@ async def get_workspace_urls():
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(health.router, prefix="/api/health-metrics", tags=["Health"])
 app.include_router(genie.router, prefix="/api/genie", tags=["AI Assistant"])
+app.include_router(costs.router, prefix="/api/costs", tags=["Costs"])
 
 
 # Serve static files (React frontend)

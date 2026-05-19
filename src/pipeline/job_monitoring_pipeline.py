@@ -71,6 +71,35 @@ def job_runs_latest():
 
 
 @dlt.table(
+    name="billing_usage_enriched",
+    comment="Pre-joined billing usage with list prices, flattened for cost analytics",
+)
+def billing_usage_enriched():
+    usage = spark.read.table("system.billing.usage")
+    prices = (
+        spark.read.table("system.billing.list_prices")
+        .filter("price_end_time IS NULL")
+    )
+    return (
+        usage.join(prices, (usage.sku_name == prices.sku_name) & (usage.cloud == prices.cloud), "left")
+        .select(
+            usage.usage_date,
+            usage.usage_metadata.job_id.alias("job_id"),
+            usage.usage_metadata.job_run_id.alias("job_run_id"),
+            usage.usage_metadata.job_name.alias("job_name"),
+            usage.workspace_id,
+            usage.sku_name,
+            usage.cloud,
+            usage.usage_quantity.alias("dbus"),
+            (usage.usage_quantity * F.coalesce(prices["pricing.default"], F.lit(0))).alias("cost_usd"),
+            F.coalesce(prices["pricing.default"], F.lit(0)).alias("unit_price"),
+            usage.identity_metadata.run_as.alias("run_as_identity"),
+        )
+        .filter("usage_date >= current_date() - INTERVAL 90 DAY")
+    )
+
+
+@dlt.table(
     name="jobs_latest",
     comment="SCD Type 1: latest state per job",
 )

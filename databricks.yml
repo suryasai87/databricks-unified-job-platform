@@ -6,19 +6,19 @@ bundle:
 variables:
   catalog:
     description: "Unity Catalog name (e.g. 'main' or your custom catalog)"
-    default: "main"
+    default: "sw_fevm_catalog"
   schema:
     description: "Schema for materialized views and synced tables"
-    default: "job_monitoring"
+    default: "cost_management"
   warehouse_id:
     description: "SQL Warehouse ID for queries (required)"
-    default: ""
+    default: "4febc7fbed179220"
   genie_space_id:
     description: "Genie Space ID for AI assistant (optional)"
     default: ""
   lakebase_instance_name:
     description: "Lakebase instance name (optional)"
-    default: ""
+    default: "jobs-monitor-sync"
   service_principal_name:
     description: "Service principal name for production run_as (required for prod target)"
     default: ""
@@ -31,6 +31,7 @@ targets:
     mode: development
     default: true
     workspace:
+      host: https://fevm-sw-fevm.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/dev
 
   staging:

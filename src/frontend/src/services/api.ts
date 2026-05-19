@@ -13,6 +13,10 @@ import type {
   GenieSpace,
   PerformanceStats,
   GanttBucketRow,
+  CostSummary,
+  DailyCost,
+  TopJob,
+  CostBySku,
 } from '../types';
 
 const api = axios.create({
@@ -99,5 +103,21 @@ export const sendMessage = (conversationId: string, content: string) =>
   api.post(`/genie/conversations/${conversationId}/messages`, { content });
 
 export const getSuggestedQuestions = () => api.get('/genie/suggested-questions');
+
+// Costs
+export const getCostSummary = (days: number = 30) =>
+  api.get<CostSummary>('/costs/summary', { params: { days } });
+
+export const getDailyCosts = (days: number = 30) =>
+  api.get<DailyCost[]>('/costs/daily', { params: { days } });
+
+export const getTopExpensiveJobs = (days: number = 30, limit: number = 20) =>
+  api.get<TopJob[]>('/costs/top-jobs', { params: { days, limit } });
+
+export const getCostBySku = (days: number = 30) =>
+  api.get<CostBySku[]>('/costs/by-sku', { params: { days } });
+
+export const getCostByIdentity = (days: number = 30, limit: number = 20) =>
+  api.get('/costs/by-identity', { params: { days, limit } });
 
 export default api;

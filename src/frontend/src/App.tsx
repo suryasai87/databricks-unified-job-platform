@@ -27,6 +27,7 @@ import {
   Speed,
   Menu as MenuIcon,
   Bolt,
+  AttachMoney,
 } from '@mui/icons-material';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -36,6 +37,7 @@ import JobsListPage from './pages/JobsList';
 import HealthPage from './pages/Health';
 import GanttViewPage from './pages/GanttView';
 import AIAssistantPage from './pages/AIAssistant';
+import CostAnalyticsPage from './pages/CostAnalytics';
 // API
 import { getAuthStatus, getAppHealth } from './services/api';
 import type { User } from './types';
@@ -47,6 +49,7 @@ const navItems = [
   { path: '/jobs', label: 'Jobs List', icon: <WorkHistory /> },
   { path: '/health', label: 'Health Monitor', icon: <HealthAndSafety /> },
   { path: '/gantt', label: 'Gantt View', icon: <Timeline /> },
+  { path: '/costs', label: 'Cost Analytics', icon: <AttachMoney /> },
   { path: '/ai', label: 'AI Assistant', icon: <SmartToy /> },
 ];
 
@@ -281,6 +284,7 @@ const App: React.FC = () => {
               <Route path="/jobs" element={<JobsListPage />} />
               <Route path="/health" element={<HealthPage />} />
               <Route path="/gantt" element={<GanttViewPage />} />
+              <Route path="/costs" element={<CostAnalyticsPage />} />
               <Route path="/ai" element={<AIAssistantPage />} />
             </Routes>
           </motion.div>

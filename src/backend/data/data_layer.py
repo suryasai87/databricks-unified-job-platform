@@ -48,6 +48,7 @@ class UnifiedDataLayer:
     TABLE_MAPPINGS = {
         "system.lakeflow.jobs": "cost_management.lb_jobs_latest",
         "system.lakeflow.job_run_timeline": "cost_management.lb_job_runs_latest",
+        "billing_usage_enriched": "cost_management.lb_billing_usage_enriched",
     }
 
     def __init__(
@@ -507,6 +508,7 @@ class UnifiedDataLayer:
         tables_to_check = [
             (f"{self.catalog}.{self.schema}.job_runs_latest", "Job run history"),
             (f"{self.catalog}.{self.schema}.jobs_latest", "Job definitions"),
+            (f"{self.catalog}.{self.schema}.billing_usage_enriched", "Billing cost data"),
         ]
 
         results = []
