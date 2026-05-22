@@ -1,6 +1,7 @@
 """
 Health Router - Job health monitoring endpoints
 """
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, HTTPException
@@ -94,7 +95,7 @@ async def get_failed_jobs(
         LIMIT {limit}
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         FailedJob(
@@ -155,7 +156,7 @@ async def get_prolonged_jobs(
         LIMIT 50
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         ProlongedJob(
@@ -278,7 +279,7 @@ async def get_anomalies(
         LIMIT 20
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         Anomaly(
@@ -377,7 +378,7 @@ async def get_retry_stats(
         LIMIT {limit}
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         {
@@ -488,7 +489,7 @@ async def get_sla_status(
         LIMIT 50
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         {
@@ -551,7 +552,7 @@ async def get_duration_percentiles(
         LIMIT 50
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         {

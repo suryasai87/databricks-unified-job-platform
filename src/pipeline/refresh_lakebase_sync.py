@@ -22,7 +22,6 @@ SYNCED_TABLES = [
     f"{catalog}.{schema}.lb_job_runs_latest",
     f"{catalog}.{schema}.lb_jobs_latest",
     f"{catalog}.{schema}.lb_synced_workspaces",
-    f"{catalog}.{schema}.lb_billing_usage_enriched",
 ]
 
 # COMMAND ----------

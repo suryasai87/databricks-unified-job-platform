@@ -149,7 +149,7 @@ async def health_check():
     """Health check with data source status."""
     return HealthResponse(
         status="healthy",
-        data_source="lakebase" if LAKEBASE_ENABLED and data_layer and data_layer.lakebase_available else "warehouse",
+        data_source="lakebase + warehouse" if LAKEBASE_ENABLED and data_layer and data_layer.lakebase_available else "warehouse",
         lakebase_enabled=LAKEBASE_ENABLED,
         cache_ttl=CACHE_TTL,
         timestamp=datetime.now().isoformat(),

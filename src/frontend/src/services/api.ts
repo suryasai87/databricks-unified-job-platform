@@ -16,6 +16,7 @@ import type {
   CostSummary,
   DailyCost,
   TopJob,
+  TopJobRun,
   CostBySku,
 } from '../types';
 
@@ -105,19 +106,20 @@ export const sendMessage = (conversationId: string, content: string) =>
 export const getSuggestedQuestions = () => api.get('/genie/suggested-questions');
 
 // Costs
-export const getCostSummary = (days: number = 30) =>
-  api.get<CostSummary>('/costs/summary', { params: { days } });
+export const getCostSummary = (days: number = 30, workspace_id?: string) =>
+  api.get<CostSummary>('/costs/summary', { params: { days, workspace_id } });
 
-export const getDailyCosts = (days: number = 30) =>
-  api.get<DailyCost[]>('/costs/daily', { params: { days } });
+export const getDailyCosts = (days: number = 30, workspace_id?: string) =>
+  api.get<DailyCost[]>('/costs/daily', { params: { days, workspace_id } });
 
-export const getTopExpensiveJobs = (days: number = 30, limit: number = 20) =>
-  api.get<TopJob[]>('/costs/top-jobs', { params: { days, limit } });
+export const getTopExpensiveJobs = (days: number = 30, limit: number = 100, workspace_id?: string) =>
+  api.get<TopJob[]>('/costs/top-jobs', { params: { days, limit, workspace_id } });
 
-export const getCostBySku = (days: number = 30) =>
-  api.get<CostBySku[]>('/costs/by-sku', { params: { days } });
+export const getTopExpensiveRuns = (days: number = 30, limit: number = 100, workspace_id?: string) =>
+  api.get<TopJobRun[]>('/costs/top-runs', { params: { days, limit, workspace_id } });
 
-export const getCostByIdentity = (days: number = 30, limit: number = 20) =>
-  api.get('/costs/by-identity', { params: { days, limit } });
+export const getCostBySku = (days: number = 30, workspace_id?: string) =>
+  api.get<CostBySku[]>('/costs/by-sku', { params: { days, workspace_id } });
+
 
 export default api;

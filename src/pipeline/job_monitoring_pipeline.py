@@ -80,7 +80,7 @@ def billing_usage_enriched():
         spark.read.table("system.billing.list_prices")
         .filter("price_end_time IS NULL")
     )
-    return (
+    joined = (
         usage.join(prices, (usage.sku_name == prices.sku_name) & (usage.cloud == prices.cloud), "left")
         .select(
             usage.usage_date,
@@ -95,7 +95,18 @@ def billing_usage_enriched():
             F.coalesce(prices["pricing.default"], F.lit(0)).alias("unit_price"),
             usage.identity_metadata.run_as.alias("run_as_identity"),
         )
-        .filter("usage_date >= current_date() - INTERVAL 90 DAY")
+        .filter("usage_date >= current_date() - INTERVAL 90 DAY AND usage_metadata.job_id IS NOT NULL")
+    )
+    return (
+        joined.groupBy("usage_date", "workspace_id", "job_id", "job_run_id", "sku_name")
+        .agg(
+            F.first("job_name").alias("job_name"),
+            F.first("cloud").alias("cloud"),
+            F.sum("dbus").alias("dbus"),
+            F.sum("cost_usd").alias("cost_usd"),
+            F.first("unit_price").alias("unit_price"),
+            F.first("run_as_identity").alias("run_as_identity"),
+        )
     )
 
 

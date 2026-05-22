@@ -48,7 +48,6 @@ class UnifiedDataLayer:
     TABLE_MAPPINGS = {
         "system.lakeflow.jobs": "cost_management.lb_jobs_latest",
         "system.lakeflow.job_run_timeline": "cost_management.lb_job_runs_latest",
-        "billing_usage_enriched": "cost_management.lb_billing_usage_enriched",
     }
 
     def __init__(
@@ -148,7 +147,7 @@ class UnifiedDataLayer:
                     f"host={host} port={port} dbname={database} "
                     f"user={pg_user} password={static_password} "
                     f"sslmode=require connect_timeout=10 "
-                    f"options='-c statement_timeout=30000'"
+                    f"options='-c statement_timeout=10000'"
                 )
                 self._lakebase_pool = ConnectionPool(
                     conninfo=conninfo,
@@ -194,7 +193,7 @@ class UnifiedDataLayer:
                 conninfo = (
                     f"host={host} port={port} dbname={database} "
                     f"user={pg_user} sslmode=require connect_timeout=10 "
-                    f"options='-c statement_timeout=30000'"
+                    f"options='-c statement_timeout=10000'"
                 )
                 self._lakebase_pool = ConnectionPool(
                     conninfo=conninfo,

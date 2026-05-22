@@ -158,6 +158,8 @@ const JobsList: React.FC = () => {
                 <MenuItem value={7}>Last 7 Days</MenuItem>
                 <MenuItem value={14}>Last 14 Days</MenuItem>
                 <MenuItem value={30}>Last 30 Days</MenuItem>
+                <MenuItem value={60}>Last 60 Days</MenuItem>
+                <MenuItem value={90}>Last 90 Days</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 150 }}>

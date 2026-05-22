@@ -1,6 +1,7 @@
 """
 Jobs Router - Job monitoring endpoints
 """
+import asyncio
 import os
 from typing import List, Optional
 from datetime import datetime
@@ -149,7 +150,7 @@ async def get_job_runs(
         LIMIT {limit}
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         JobRun(
@@ -195,7 +196,7 @@ async def get_run_summary(
         WHERE period_start_time >= CURRENT_DATE - INTERVAL '{days} days'
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     if not result.data:
         return RunSummary(total_runs=0, succeeded=0, failed=0, running=0, success_rate=0)
@@ -246,7 +247,7 @@ async def get_daily_runs(
         ORDER BY run_date
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         {
@@ -286,7 +287,7 @@ async def get_runs_by_type(
         ORDER BY count DESC
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [{"run_type": row[0], "count": int(row[1])} for row in result.data]
 
@@ -358,7 +359,7 @@ async def get_jobs_matrix(
         LIMIT {limit * runs_per_job}
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     # Group by job
     jobs = {}
@@ -450,7 +451,7 @@ async def get_overlapping_runs(
         LIMIT 100
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         {
@@ -538,7 +539,7 @@ async def get_concurrent_jobs_over_time(
         LIMIT 10000
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         {"time": row[0], "concurrent_jobs": int(row[1])}
@@ -627,7 +628,7 @@ async def get_gantt_data(
         ORDER BY job_id, bucket
     """
 
-    result = dl.execute_query(query, lakebase_query=lb_query)
+    result = await asyncio.to_thread(dl.execute_query, query, None, True, True, lb_query)
 
     return [
         GanttBucket(

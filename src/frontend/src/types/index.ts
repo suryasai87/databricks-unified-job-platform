@@ -104,15 +104,22 @@ export interface TopJob {
   job_url: string | null;
 }
 
+export interface TopJobRun {
+  job_id: string;
+  job_name: string | null;
+  job_run_id: string;
+  workspace_id: string | null;
+  result_state: string | null;
+  cost: number;
+  dbus: number;
+  sku_name: string | null;
+}
+
 export interface CostBySku {
   sku_name: string;
-  cloud: string;
-  category: string;
-  unit_price: number;
   total_dbus: number;
   total_cost: number;
   job_count: number;
-  workspace_count: number;
 }
 
 export interface CostByProject {

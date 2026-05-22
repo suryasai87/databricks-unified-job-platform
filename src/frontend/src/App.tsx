@@ -24,10 +24,10 @@ import {
   HealthAndSafety,
   Timeline,
   SmartToy,
-  Speed,
   Menu as MenuIcon,
   Bolt,
   AttachMoney,
+  Speed,
 } from '@mui/icons-material';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -105,11 +105,15 @@ const App: React.FC = () => {
 
       {/* Data Source Indicator */}
       <Box sx={{ px: 2, py: 1 }}>
-        <Tooltip title={dataSource === 'lakebase' ? 'Real-time data via Lakebase' : 'Data via SQL Warehouse'}>
+        <Tooltip title={
+          dataSource.includes('lakebase')
+            ? 'Lakebase for job monitoring, SQL Warehouse for cost analytics'
+            : 'All queries via SQL Warehouse'
+        }>
           <Chip
             icon={<Speed />}
-            label={dataSource === 'lakebase' ? 'Lakebase' : 'SQL Warehouse'}
-            color={dataSource === 'lakebase' ? 'success' : 'default'}
+            label={dataSource.includes('lakebase') ? 'Lakebase + Warehouse' : 'SQL Warehouse'}
+            color={dataSource.includes('lakebase') ? 'success' : 'default'}
             size="small"
             sx={{ width: '100%' }}
           />
