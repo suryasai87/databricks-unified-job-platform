@@ -50,11 +50,12 @@ def job_runs_latest():
     agg = df.groupBy("account_id", "workspace_id", "job_id", "run_id").agg(
         F.min("period_start_time").alias("period_start_time"),
         F.max("period_end_time").alias("period_end_time"),
-        F.max("result_state").alias("result_state"),
+        # Take outcome from the latest period so repaired runs reflect their final state
+        F.max_by("result_state", "period_end_time").alias("result_state"),
         F.max("run_name").alias("run_name"),
         F.max("run_type").alias("run_type"),
         F.max("trigger_type").alias("trigger_type"),
-        F.max("termination_code").alias("termination_code"),
+        F.max_by("termination_code", "period_end_time").alias("termination_code"),
         F.sum("run_duration_seconds").alias("run_duration_seconds"),
         F.sum("execution_duration_seconds").alias("_raw_exec_dur"),
         F.sum("setup_duration_seconds").alias("setup_duration_seconds"),
